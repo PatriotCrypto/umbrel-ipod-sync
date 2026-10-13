@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="iPod Sync">
+  <rect width="256" height="256" rx="56" fill="#2a64d6"/>
+  <rect x="84" y="40" width="88" height="176" rx="18" fill="#f4f5f7"/>
+  <rect x="96" y="56" width="64" height="52" rx="6" fill="#2a64d6" opacity="0.85"/>
+  <circle cx="128" cy="164" r="30" fill="none" stroke="#2a64d6" stroke-width="10"/>
+  <circle cx="128" cy="164" r="9" fill="#2a64d6"/>
+  <path d="M206 96a42 42 0 0 0-20-22" fill="none" stroke="#f4f5f7" stroke-width="9" stroke-linecap="round"/>
+  <path d="M186 60l2 16-16-2" fill="none" stroke="#f4f5f7" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M50 160a42 42 0 0 0 20 22" fill="none" stroke="#f4f5f7" stroke-width="9" stroke-linecap="round"/>
+  <path d="M70 196l-2-16 16 2" fill="none" stroke="#f4f5f7" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

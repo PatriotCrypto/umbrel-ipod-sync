@@ -1,0 +1,42 @@
+manifestVersion: 1
+id: patriot-ipod-sync
+category: media
+name: iPod Sync
+version: "1.0.0"
+tagline: Put music from your Umbrel on an iPod nano
+description: >-
+  Browse the music stored on your Umbrel and copy it to an iPod plugged into
+  the Umbrel's USB port. Pick albums or single songs, see how much space they
+  will use, and sync with one click.
+
+
+  Songs the iPod cannot play (FLAC, Ogg, Opus and similar) are converted to AAC
+  on the way, album covers are copied across, and the iPod's music database is
+  backed up before every sync so a bad write can be undone.
+
+
+  Built and tested for the iPod nano 5th generation. Other iPods that libgpod
+  supports (classic, video, nano 1st to 4th generation) should work too.
+
+
+  Your music is found in the Downloads folder: add songs anywhere inside it and
+  choose Rescan library. The app only reads that folder and never changes it.
+
+
+  Before the first sync, the nano 5th generation must have been synced once with
+  iTunes (or Apple Devices or Finder). That is how the iPod's database signature
+  is learned. The app tells you if this step is still needed.
+developer: PatriotCrypto
+website: https://github.com/PatriotCrypto/umbrel-ipod-sync
+dependencies: []
+repo: https://github.com/PatriotCrypto/umbrel-ipod-sync
+support: https://github.com/PatriotCrypto/umbrel-ipod-sync/issues
+port: 8741
+gallery: []
+path: ""
+releaseNotes: >-
+  First release.
+submitter: PatriotCrypto
+permissions:
+  - STORAGE_DOWNLOADS
+icon: https://raw.githubusercontent.com/PatriotCrypto/umbrel-ipod-sync/main/patriot-ipod-sync/icon.svg

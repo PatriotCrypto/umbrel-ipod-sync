@@ -1,0 +1,59 @@
+name: Publish image
+
+# Run this from the Actions tab: "Publish image" -> "Run workflow".
+# It builds the app for Intel/AMD and Raspberry Pi (arm64) Umbrels and pushes it
+# to GitHub's container registry. The summary of the run shows the exact image
+# line to pass to scripts/set-image.sh.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Image tag, normally the version in umbrel-app.yml"
+        required: true
+        default: "1.0.0"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lowercase the owner (registry names must be lowercase)
+        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./ipod-sync-src
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ env.OWNER }}/umbrel-ipod-sync:${{ inputs.version }}
+
+      - name: Show the image line to use
+        run: |
+          {
+            echo "### Image published"
+            echo
+            echo "Run this in your checkout of the repository:"
+            echo
+            echo '```'
+            echo "./scripts/set-image.sh ghcr.io/${OWNER}/umbrel-ipod-sync:${{ inputs.version }}@${{ steps.build.outputs.digest }}"
+            echo '```'
+            echo
+            echo "Then make the package public: GitHub profile -> Packages -> umbrel-ipod-sync -> Package settings -> Change visibility -> Public."
+          } >> "$GITHUB_STEP_SUMMARY"

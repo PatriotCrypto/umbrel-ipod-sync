@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>iPod Sync</title>
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>iPod Sync</h1>
+    <div class="top-actions">
+      <span id="scan-state" class="muted" role="status"></span>
+      <button id="btn-rescan" class="quiet" type="button">Rescan library</button>
+      <button id="btn-settings" class="quiet" type="button">Settings</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="browser" aria-label="Music">
+      <div class="tabs" role="tablist">
+        <button id="tab-library" class="tab" role="tab" aria-selected="true" type="button">
+          Library <span id="lib-count" class="count"></span>
+        </button>
+        <button id="tab-ipod" class="tab" role="tab" aria-selected="false" type="button">
+          On iPod <span id="ipod-count" class="count"></span>
+        </button>
+      </div>
+      <div class="searchbar">
+        <input id="q" type="search" placeholder="Search your music"
+               aria-label="Search" autocomplete="off">
+        <button id="btn-select-all" class="quiet" type="button">Select all</button>
+      </div>
+      <div id="list" class="list"></div>
+      <div id="more" class="more"></div>
+    </section>
+
+    <aside id="pod" class="pod" aria-label="iPod"></aside>
+  </main>
+
+  <dialog id="settings" aria-labelledby="settings-title">
+    <form method="dialog" class="sheet">
+      <h2 id="settings-title">Settings</h2>
+
+      <label class="field">
+        <span>Quality of converted songs</span>
+        <select id="set-bitrate">
+          <option value="128">128 kbit/s (smallest)</option>
+          <option value="192">192 kbit/s</option>
+          <option value="256">256 kbit/s (recommended)</option>
+          <option value="320">320 kbit/s (largest)</option>
+        </select>
+        <small>FLAC, Ogg, Opus and other formats the iPod cannot play are converted to AAC.</small>
+      </label>
+
+      <label class="check">
+        <input id="set-lossless" type="checkbox">
+        <span>Convert lossless files (ALAC, WAV, AIFF) to save space</span>
+      </label>
+      <label class="check">
+        <input id="set-artwork" type="checkbox">
+        <span>Copy album covers to the iPod</span>
+      </label>
+      <label class="check">
+        <input id="set-force" type="checkbox">
+        <span>Allow writing to Mac-formatted iPods with journaling on
+          <em>(can corrupt the iPod)</em></span>
+      </label>
+
+      <h3>Backups</h3>
+      <p class="muted small">A copy of the iPod's music database is saved before every sync.
+        Restoring one puts the database back as it was; songs copied after that backup stay on
+        the iPod but no longer show up in its menus.</p>
+      <ul id="backup-list" class="backups"></ul>
+
+      <div class="actions">
+        <button value="close" class="primary">Done</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

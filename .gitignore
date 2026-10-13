@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+ipod-sync-src/helper/ipodsync
+.DS_Store

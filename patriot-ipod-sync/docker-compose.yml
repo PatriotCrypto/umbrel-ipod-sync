@@ -1,0 +1,39 @@
+version: "3.7"
+
+services:
+  app_proxy:
+    environment:
+      # <app-id>_<service>_1
+      APP_HOST: patriot-ipod-sync_web_1
+      APP_PORT: 8080
+
+  web:
+    # Set this line with scripts/set-image.sh after the GitHub workflow has run.
+    image: ghcr.io/patriotcrypto/umbrel-ipod-sync:1.0.0@sha256:YOUR_IMAGE_DIGEST
+    restart: on-failure
+    init: true
+
+    # Why this container is privileged: it has to mount the iPod's storage
+    # (needs the mount capability and the iPod's block device, which only
+    # appears when the iPod is plugged in) and read the iPod's description over
+    # raw USB (needs /dev/bus/usb). Docker cannot hand those out ahead of time
+    # for a device that is not connected yet.
+    #
+    # Narrower alternative to try if you prefer (untested; replace the
+    # "privileged: true" line with these):
+    #   cap_add: [SYS_ADMIN]
+    #   security_opt: ["apparmor:unconfined"]
+    #   device_cgroup_rules: ["b 8:* rmw", "c 189:* rmw"]
+    privileged: true
+
+    volumes:
+      # Live device nodes, so an iPod plugged in later is visible.
+      - /dev:/dev
+      # Your Umbrel's Downloads folder, read only. Music is found anywhere inside.
+      - ${UMBREL_ROOT}/data/storage/downloads:/music:ro
+      # Library index, album covers, settings and iPod database backups.
+      - ${APP_DATA_DIR}/data:/data
+    environment:
+      MUSIC_DIR: /music
+      DATA_DIR: /data
+      PORT: "8080"
