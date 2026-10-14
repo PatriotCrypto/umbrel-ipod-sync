@@ -228,3 +228,55 @@ def test_http_api(pod, scanned):
     listed = client.get("/api/ipod/tracks?q=gamma").json
     assert listed["total"] == 2
     assert client.post("/api/sync/start", json={"albums": all_album_ids()}).status_code == 409
+
+
+# ---------- tiles: sorting, filtering, on-iPod split ----------
+
+def test_album_listing_sort_filter_and_letters(scanned):
+    everything = library.list_albums("", 50)
+    assert everything["counts"] == {"all": 3, "new": 3, "on": 0}
+    assert everything["letters"] == ["A", "B", "G"]            # Alpha Band, Béta (NFKD -> B), Gamma
+    assert [a["artist"] for a in everything["albums"]] == ["Alpha Band", "Béta & Friends", "Gamma"]
+
+    by_album = library.list_albums("", 50, sort="album")
+    assert [a["album"] for a in by_album["albums"]] == ["Café Sessions", "First Light", "Mixed"]
+    assert by_album["letters"] == ["C", "F", "M"]
+
+    only_b = library.list_albums("", 50, letter="b")
+    assert [a["album"] for a in only_b["albums"]] == ["Café Sessions"]
+    assert only_b["letters"] == ["A", "B", "G"]                # the bar keeps every letter
+
+    assert [a["album"] for a in library.list_albums("", 50, artist=" gamma ")["albums"]] == ["Mixed"]
+    assert library.list_albums("", 50, sort="bogus", status="bogus")["total"] == 3
+    assert len(library.list_albums("", 2)["albums"]) == 2
+    assert library.list_albums("", 2, 2)["albums"][0]["artist"] == "Gamma"
+    assert library.list_albums("", 50, sort="size")["albums"][0]["size"] >= \
+        library.list_albums("", 50, sort="size")["albums"][-1]["size"]
+    assert library.list_albums("", 50, sort="recent")["total"] == 3
+    assert [a["year"] for a in library.list_albums("", 50, sort="year")["albums"]] == [2019, None, None]
+
+
+def test_on_ipod_split(pod, scanned):
+    client = create_app(start_scan=False).test_client()
+    mixed = client.get("/api/library/albums?q=mixed").json["albums"][0]
+    one_song = client.get(f"/api/library/albums/{mixed['id']}/tracks").json["tracks"][0]["id"]
+    assert client.post("/api/sync/start", json={"tracks": [one_song]}).status_code == 200
+    assert wait_for_job()["state"] == "done"
+
+    new = client.get("/api/library/albums?status=new").json
+    assert new["counts"] == {"all": 3, "new": 3, "on": 1}      # partly-copied album is still "to add"
+    assert new["total"] == 3
+    on = client.get("/api/library/albums?status=on").json
+    assert [a["album"] for a in on["albums"]] == ["Mixed"] and on["albums"][0]["on_ipod"] == 1
+
+    assert client.post("/api/sync/start", json={"albums": all_album_ids()}).status_code == 200
+    assert wait_for_job()["state"] == "done"
+    new = client.get("/api/library/albums?status=new").json
+    assert new["total"] == 0 and new["counts"] == {"all": 3, "new": 0, "on": 3}
+    assert client.get("/api/library/albums?status=on").json["total"] == 3
+
+    # iPod tracks carry the library album id so the UI can show their cover
+    listing = client.get("/api/ipod/tracks?refresh=1").json["tracks"]
+    ids = set(all_album_ids())
+    assert listing and all(t["album_key"] in ids for t in listing)
+    assert {"albumartist", "year"} <= set(listing[0])

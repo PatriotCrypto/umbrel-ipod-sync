@@ -107,8 +107,11 @@ def create_app(start_scan=True):
         tracks = sorted(tracks, key=lambda t: (t["artist"].lower(), t["album"].lower(),
                                                t["disc"], t["track"], t["title"].lower()))
         page = tracks[offset:offset + limit]
+        covers = library.album_keys_for({t["key"] for t in page})
         return jsonify(total=len(tracks), revision=ipod.revision(), tracks=[
-            {k: t[k] for k in ("id", "title", "artist", "album", "track", "duration_ms", "size")}
+            dict({k: t[k] for k in ("id", "title", "artist", "album", "albumartist", "track",
+                                    "year", "duration_ms", "size")},
+                 album_key=covers.get(t["key"], ""))
             for t in page])
 
     @app.get("/api/library")
@@ -123,9 +126,11 @@ def create_app(start_scan=True):
     @app.get("/api/library/albums")
     def albums():
         keys = {t["key"] for t in ipod.current_tracks()} if ipod.is_mounted() else set()
-        return jsonify(library.list_albums(request.args.get("q", ""),
-                                           request.args.get("limit", 60),
-                                           request.args.get("offset", 0), keys))
+        return jsonify(library.list_albums(
+            request.args.get("q", ""), request.args.get("limit", 60),
+            request.args.get("offset", 0), keys, sort=request.args.get("sort", "artist"),
+            status=request.args.get("status", "all"), letter=request.args.get("letter", ""),
+            artist=request.args.get("artist", "")))
 
     @app.get("/api/library/albums/<key>/tracks")
     def album_tracks(key):

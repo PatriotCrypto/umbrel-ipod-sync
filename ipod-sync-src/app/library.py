@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+import unicodedata
 
 from . import audio, config
 
@@ -173,10 +174,34 @@ def summary():
         conn.close()
 
 
-def list_albums(query="", limit=60, offset=0, ipod_keys=None):
+SORTS = ("artist", "album", "year", "size", "recent")
+STATUSES = ("all", "new", "on")
+
+
+def _fold(text):
+    """Lower-case and accent-free, so "Émile" sorts with the E's."""
+    decomposed = unicodedata.normalize("NFKD", _norm(text))
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
+def letter_of(text):
+    """A-Z index letter for a name; everything else (digits, symbols) is '#'."""
+    for ch in unicodedata.normalize("NFKD", text or ""):
+        if ch.isalnum():
+            return ch.upper() if ch.isascii() and ch.isalpha() else "#"
+    return "#"
+
+
+def list_albums(query="", limit=60, offset=0, ipod_keys=None, sort="artist",
+                status="all", letter="", artist=""):
+    """Albums as tiles. `status`: all, new (something still to add) or on (anything on the
+    iPod). `letter` filters by the first letter of the artist (sort=artist) or album."""
     ipod_keys = ipod_keys or set()
     limit = max(1, min(int(limit), 200))
     offset = max(0, int(offset))
+    sort = sort if sort in SORTS else "artist"
+    status = status if status in STATUSES else "all"
+    letter = (letter or "").upper()[:1]
     where, args = "", []
     terms = [t for t in _norm(query).split(" ") if t]
     if terms:
@@ -188,37 +213,75 @@ def list_albums(query="", limit=60, offset=0, ipod_keys=None):
         where = "WHERE " + " AND ".join(clauses)
     conn = connect()
     try:
-        total = conn.execute(
-            f"SELECT COUNT(DISTINCT album_key) FROM tracks {where}", args).fetchone()[0]
         rows = conn.execute(
             f"""SELECT album_key, MIN(album) AS album,
                        MIN(CASE WHEN albumartist != '' THEN albumartist END) AS albumartist,
                        MIN(artist) AS artist, MAX(compilation) AS compilation,
                        MAX(year) AS year, COUNT(*) AS tracks,
-                       SUM(duration_ms) AS duration_ms, SUM(size) AS size
+                       SUM(duration_ms) AS duration_ms, SUM(size) AS size,
+                       MAX(mtime) AS added
                 FROM tracks {where}
-                GROUP BY album_key
-                ORDER BY lower(COALESCE(MIN(CASE WHEN albumartist != '' THEN albumartist END),
-                                        MIN(artist))), lower(MIN(album))
-                LIMIT ? OFFSET ?""", args + [limit, offset]).fetchall()
-        keys = [r["album_key"] for r in rows]
+                GROUP BY album_key""", args).fetchall()
         on_ipod = {}
-        if keys and ipod_keys:
-            marks = ",".join("?" * len(keys))
-            for r in conn.execute(
-                    f"SELECT album_key, key FROM tracks WHERE album_key IN ({marks})", keys):
+        if rows and ipod_keys:
+            for r in conn.execute("SELECT album_key, key FROM tracks"):
                 if r["key"] in ipod_keys:
                     on_ipod[r["album_key"]] = on_ipod.get(r["album_key"], 0) + 1
-        albums = []
-        for r in rows:
-            artist = r["albumartist"] or ("Various Artists" if r["compilation"] else r["artist"])
-            albums.append({
-                "id": r["album_key"], "album": r["album"], "artist": artist,
-                "year": r["year"] or None, "tracks": r["tracks"],
-                "duration_ms": r["duration_ms"] or 0, "size": r["size"] or 0,
-                "on_ipod": on_ipod.get(r["album_key"], 0),
-            })
-        return {"total": total, "albums": albums}
+    finally:
+        conn.close()
+
+    albums = []
+    for r in rows:
+        shown = r["albumartist"] or ("Various Artists" if r["compilation"] else r["artist"])
+        albums.append({
+            "id": r["album_key"], "album": r["album"] or "", "artist": shown or "",
+            "year": r["year"] or None, "tracks": r["tracks"],
+            "duration_ms": r["duration_ms"] or 0, "size": r["size"] or 0,
+            "on_ipod": on_ipod.get(r["album_key"], 0), "added": int(r["added"] or 0),
+        })
+
+    counts = {"all": len(albums),
+              "new": sum(1 for a in albums if a["on_ipod"] < a["tracks"]),
+              "on": sum(1 for a in albums if a["on_ipod"] > 0)}
+    if status == "new":
+        albums = [a for a in albums if a["on_ipod"] < a["tracks"]]
+    elif status == "on":
+        albums = [a for a in albums if a["on_ipod"] > 0]
+    if artist:
+        wanted = _norm(artist)
+        albums = [a for a in albums if _norm(a["artist"]) == wanted]
+
+    by_artist = lambda a: (_fold(a["artist"]), _fold(a["album"]))
+    by_album = lambda a: (_fold(a["album"]), _fold(a["artist"]))
+    if sort == "album":
+        albums.sort(key=by_album)
+    elif sort == "year":
+        albums.sort(key=lambda a: (a["year"] is None, -(a["year"] or 0)) + by_artist(a))
+    elif sort == "size":
+        albums.sort(key=lambda a: (-a["size"],) + by_artist(a))
+    elif sort == "recent":
+        albums.sort(key=lambda a: (-a["added"],) + by_artist(a))
+    else:
+        albums.sort(key=by_artist)
+
+    letters = []
+    if sort in ("artist", "album"):
+        field = "album" if sort == "album" else "artist"
+        letters = sorted({letter_of(a[field]) for a in albums})
+        if letter:
+            albums = [a for a in albums if letter_of(a[field]) == letter]
+    return {"total": len(albums), "albums": albums[offset:offset + limit],
+            "counts": counts, "letters": letters}
+
+
+def album_keys_for(track_keys):
+    """Map track key -> album key for the tracks the library knows about."""
+    if not track_keys:
+        return {}
+    conn = connect()
+    try:
+        return {r["key"]: r["album_key"] for r in conn.execute("SELECT key, album_key FROM tracks")
+                if r["key"] in track_keys}
     finally:
         conn.close()
 

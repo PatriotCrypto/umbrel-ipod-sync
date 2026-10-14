@@ -29,8 +29,28 @@
     const s = Math.round((ms || 0) / 1000);
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   };
+  const formatLength = (ms) => {
+    const minutes = Math.round((ms || 0) / 60000);
+    return minutes >= 60 ? `${Math.floor(minutes / 60)} h ${minutes % 60} min` : `${Math.max(1, minutes)} min`;
+  };
   const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
   const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+  const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const hueOf = (s) => {
+    let n = 7;
+    for (const ch of String(s)) n = (n * 31 + ch.charCodeAt(0)) >>> 0;
+    return n % 360;
+  };
+
+  const prefs = {
+    get(key, fallback) {
+      try { const v = localStorage.getItem(`ipodsync.${key}`); return v === null ? fallback : v; }
+      catch (_) { return fallback; }
+    },
+    set(key, value) {
+      try { localStorage.setItem(`ipodsync.${key}`, String(value)); } catch (_) { /* private mode */ }
+    },
+  };
 
   // "Nano with camera (5th Gen.)" -> { title: "iPod nano", generation: "5th generation" }
   function deviceName(d) {
@@ -73,6 +93,7 @@
   };
   // Silver, black and yellow make poor button colours, so those keep the default blue.
   const WEAK_ACTION = new Set(['silver', 'black', 'yellow']);
+  const DARK_TEXT = new Set(['silver', 'yellow']);
 
   function applyDeviceColor(color) {
     const root = document.documentElement.style;
@@ -80,15 +101,23 @@
     if (device) root.setProperty('--device', device); else root.removeProperty('--device');
     if (device && !WEAK_ACTION.has(color)) root.setProperty('--action', device);
     else root.removeProperty('--action');
+    if (device && DARK_TEXT.has(color)) root.setProperty('--on-device', '#1c2b3d');
+    else root.removeProperty('--on-device');
   }
 
   // ---------- state ----------
   const state = {
-    tab: 'library', q: '',
-    albums: [], albumTotal: 0, loadingAlbums: false,
-    ipodTracks: [], ipodTotal: 0, revision: '',
-    expanded: new Map(),
+    tab: 'library', q: '', letter: '',
+    view: prefs.get('view', 'new') === 'all' ? 'all' : 'new',
+    sort: ['artist', 'album', 'year', 'recent', 'size'].includes(prefs.get('sort', 'artist')) ? prefs.get('sort', 'artist') : 'artist',
+    tile: ['1', '2', '3'].includes(prefs.get('tile', '2')) ? prefs.get('tile', '2') : '2',
+    albums: [], albumTotal: 0, counts: { all: 0, new: 0, on: 0 }, letters: [],
+    loadingAlbums: false, albumSeq: 0,
+    ipodTracks: [], ipodAlbums: [], ipodTotal: 0, ipodSeq: 0, revision: '',
+    sheet: null,
     selAlbums: new Set(), selTracks: new Set(), selRemove: new Set(),
+    info: new Map(),          // album id -> { album, artist } for the selection tray
+    trackAlbum: new Map(),    // library track id -> album id, learned when an album is opened
     status: null, plan: null, planError: '', planSeq: 0,
     job: null, finishedJob: null,
     mounting: false, mountError: '',
@@ -98,29 +127,82 @@
   const ipodState = () => (state.status && state.status.ipod) || { state: 'unknown' };
   const device = () => ipodState().device;
   const selectionCount = () => state.selAlbums.size + state.selTracks.size + state.selRemove.size;
+  // Without an iPod there is nothing to split into "to add" and "already there".
+  const effectiveView = () => (device() ? state.view : 'all');
+
+  function clearSelection() {
+    state.selAlbums.clear(); state.selTracks.clear(); state.selRemove.clear();
+  }
 
   // ---------- data loading ----------
+  function albumsUrl(extra) {
+    const params = new URLSearchParams({
+      q: state.q, sort: state.sort, status: effectiveView(), letter: state.letter, ...extra,
+    });
+    return `/api/library/albums?${params}`;
+  }
+
+  function remember(albums) {
+    albums.forEach((a) => state.info.set(a.id, { album: a.album, artist: a.artist }));
+  }
+
   async function loadAlbums(reset) {
-    if (state.loadingAlbums) return;
+    if (!reset && state.loadingAlbums) return;
+    const seq = reset ? ++state.albumSeq : state.albumSeq;
     state.loadingAlbums = true;
     try {
       const offset = reset ? 0 : state.albums.length;
-      const data = await api(`/api/library/albums?q=${encodeURIComponent(state.q)}&limit=60&offset=${offset}`);
+      const data = await api(albumsUrl({ limit: 120, offset }));
+      if (seq !== state.albumSeq) return;
       state.albums = reset ? data.albums : state.albums.concat(data.albums);
       state.albumTotal = data.total;
-    } catch (err) { toast(err.message); }
-    state.loadingAlbums = false;
-    renderList();
+      state.counts = data.counts;
+      state.letters = data.letters;
+      remember(data.albums);
+    } catch (err) {
+      if (seq === state.albumSeq) toast(err.message);
+    } finally {
+      if (seq === state.albumSeq) state.loadingAlbums = false;
+    }
+    if (seq === state.albumSeq) { renderToolbar(); renderList(); }
+  }
+
+  function groupIpod(tracks) {
+    const groups = new Map();
+    for (const t of tracks) {
+      const artist = t.albumartist || t.artist || 'Unknown artist';
+      const album = t.album || 'Unknown album';
+      const key = `${norm(artist)}|${norm(album)}`;
+      let g = groups.get(key);
+      if (!g) {
+        g = { id: `ip:${key}`, artist, album, year: t.year || null, tracks: [], size: 0, duration_ms: 0, cover: '' };
+        groups.set(key, g);
+      }
+      g.tracks.push(t);
+      g.size += t.size || 0;
+      g.duration_ms += t.duration_ms || 0;
+      if (!g.cover && t.album_key) g.cover = t.album_key;
+    }
+    return [...groups.values()].sort((a, b) =>
+      norm(a.artist).localeCompare(norm(b.artist)) || norm(a.album).localeCompare(norm(b.album)));
   }
 
   async function loadIpodTracks() {
+    const seq = ++state.ipodSeq;
+    let tracks = [], total = 0, revision = '';
     try {
-      const data = await api(`/api/ipod/tracks?q=${encodeURIComponent(state.q)}&limit=200&refresh=1`);
-      state.ipodTracks = data.tracks;
-      state.ipodTotal = data.total;
-      state.revision = data.revision;
-    } catch (err) { state.ipodTracks = []; state.ipodTotal = 0; }
-    renderList();
+      for (let offset = 0; offset < 20000; offset += 500) {
+        const data = await api(`/api/ipod/tracks?q=${encodeURIComponent(state.q)}&limit=500&offset=${offset}` +
+                               (offset === 0 ? '&refresh=1' : ''));
+        tracks = tracks.concat(data.tracks);
+        total = data.total; revision = data.revision;
+        if (!data.tracks.length || tracks.length >= total) break;
+      }
+    } catch (err) { tracks = []; total = 0; }
+    if (seq !== state.ipodSeq) return;
+    state.ipodTracks = tracks; state.ipodTotal = total; state.ipodAlbums = groupIpod(tracks);
+    if (revision) state.revision = revision;
+    renderToolbar(); renderList(); renderSheet();
   }
 
   function reloadList() {
@@ -140,8 +222,8 @@
     clearTimeout(planTimer);
     state.plan = null; state.planError = '';
     state.finishedJob = null;
-    if (!selectionCount()) { renderPod(); return; }
     renderPod();
+    if (!selectionCount()) return;
     planTimer = setTimeout(async () => {
       const seq = ++state.planSeq;
       try {
@@ -164,7 +246,8 @@
     try {
       const data = await api('/api/sync/start', { method: 'POST', body: planBody() });
       state.job = data.job; state.finishedJob = null;
-      renderPod();
+      closeSheet();
+      renderPod(); renderLcd();
       pollJob();
     } catch (err) { toast(err.message); }
   }
@@ -175,23 +258,25 @@
       state.job = data.job;
     } catch (_) { /* keep trying */ }
     if (state.job && state.job.state === 'running') {
-      renderPod();
+      renderPod(); renderLcd();
       setTimeout(pollJob, 1000);
       return;
     }
     if (state.job) {
       state.finishedJob = state.job;
-      state.selAlbums.clear(); state.selTracks.clear(); state.selRemove.clear();
-      state.plan = null; state.expanded.clear();
+      clearSelection();
+      state.plan = null;
       state.job = null;
+      closeSheet();
       await refreshStatus();
       reloadList();
     }
-    renderPod();
+    renderPod(); renderLcd();
   }
 
   // ---------- status polling ----------
   let lastRevision = null;
+  let lastScanError = '';
   async function refreshStatus() {
     try {
       state.status = await api('/api/status');
@@ -210,10 +295,10 @@
     if (revision !== lastRevision) {
       lastRevision = revision;
       state.revision = pod.device ? pod.device.revision : '';
-      if (state.tab === 'ipod') loadIpodTracks(); else renderList();
-      if (state.tab === 'library') loadAlbums(true);
+      reloadList();
     }
     renderTop();
+    renderToolbar();
     renderPod();
   }
 
@@ -229,26 +314,29 @@
   async function ejectIpod() {
     try {
       await api('/api/ipod/eject', { method: 'POST' });
-      state.selAlbums.clear(); state.selTracks.clear(); state.selRemove.clear();
+      clearSelection();
       state.plan = null;
+      closeSheet();
       toast('The iPod is safe to unplug.');
     } catch (err) { toast(err.message); }
     await refreshStatus();
   }
 
   // ---------- selection ----------
-  function toggleAlbum(album, on) {
-    if (on) { state.selAlbums.add(album.id); }
-    else {
-      state.selAlbums.delete(album.id);
-      const tracks = state.expanded.get(album.id) || [];
-      tracks.forEach((t) => state.selTracks.delete(t.id));
+  function dropLooseTracks(albumId) {
+    for (const [trackId, owner] of state.trackAlbum) {
+      if (owner === albumId) state.selTracks.delete(trackId);
     }
-    schedulePlan(); renderList();
+  }
+
+  function toggleAlbum(album, on) {
+    if (on) { state.selAlbums.add(album.id); dropLooseTracks(album.id); }
+    else { state.selAlbums.delete(album.id); dropLooseTracks(album.id); }
+    schedulePlan(); renderList(); renderSheet();
   }
 
   function toggleTrack(album, track, on) {
-    const tracks = state.expanded.get(album.id) || [];
+    const tracks = state.sheet ? state.sheet.tracks : [];
     if (on) {
       state.selTracks.add(track.id);
       if (tracks.every((t) => t.on_ipod || state.selTracks.has(t.id))) {
@@ -261,115 +349,268 @@
     } else {
       state.selTracks.delete(track.id);
     }
-    schedulePlan(); renderList();
+    schedulePlan(); renderList(); renderSheet();
   }
 
-  async function toggleExpand(album) {
-    if (state.expanded.has(album.id)) state.expanded.delete(album.id);
-    else {
-      try {
-        const data = await api(`/api/library/albums/${album.id}/tracks`);
-        state.expanded.set(album.id, data.tracks);
-      } catch (err) { toast(err.message); return; }
+  // iPod side: an album is "selected" when all of its songs are marked for removal.
+  const removeState = (album) => {
+    const n = album.tracks.filter((t) => state.selRemove.has(t.id)).length;
+    return n === 0 ? 'none' : n === album.tracks.length ? 'all' : 'some';
+  };
+
+  function toggleIpodAlbum(album, on) {
+    album.tracks.forEach((t) => { if (on) state.selRemove.add(t.id); else state.selRemove.delete(t.id); });
+    schedulePlan(); renderList(); renderSheet();
+  }
+
+  function toggleIpodTrack(track, on) {
+    if (on) state.selRemove.add(track.id); else state.selRemove.delete(track.id);
+    schedulePlan(); renderList(); renderSheet();
+  }
+
+  async function fetchAlbums(extra) {
+    const all = [];
+    for (let offset = 0; offset < 100000; offset += 200) {
+      const data = await api(albumsUrl({ limit: 200, offset, ...extra }));
+      all.push(...data.albums);
+      if (all.length >= data.total || !data.albums.length) break;
     }
-    renderList();
+    remember(all);
+    return all;
   }
 
   async function selectAll() {
     if (selectionCount()) {
-      state.selAlbums.clear(); state.selTracks.clear(); state.selRemove.clear();
-      schedulePlan(); renderList(); return;
+      clearSelection();
+      schedulePlan(); renderList(); renderSheet(); return;
     }
     try {
       if (state.tab === 'library') {
-        for (let offset = 0; offset < state.albumTotal; offset += 200) {
-          const data = await api(`/api/library/albums?q=${encodeURIComponent(state.q)}&limit=200&offset=${offset}`);
-          data.albums.filter((a) => a.on_ipod < a.tracks).forEach((a) => state.selAlbums.add(a.id));
-        }
+        (await fetchAlbums({ status: 'new' })).forEach((a) => state.selAlbums.add(a.id));
       } else {
-        for (let offset = 0; offset < state.ipodTotal; offset += 500) {
-          const data = await api(`/api/ipod/tracks?q=${encodeURIComponent(state.q)}&limit=500&offset=${offset}`);
-          data.tracks.forEach((t) => state.selRemove.add(t.id));
-        }
+        state.ipodTracks.forEach((t) => state.selRemove.add(t.id));
       }
     } catch (err) { toast(err.message); }
     schedulePlan(); renderList();
   }
 
-  // ---------- rendering: top bar and list ----------
+  async function selectArtist(artist, on) {
+    try {
+      if (state.tab === 'library') {
+        const params = new URLSearchParams({ artist, status: 'new', limit: 200, sort: 'artist' });
+        const data = await api(`/api/library/albums?${params}`);
+        remember(data.albums);
+        data.albums.forEach((a) => { if (on) state.selAlbums.add(a.id); else state.selAlbums.delete(a.id); dropLooseTracks(a.id); });
+      } else {
+        state.ipodAlbums.filter((a) => norm(a.artist) === norm(artist)).forEach((a) => {
+          a.tracks.forEach((t) => { if (on) state.selRemove.add(t.id); else state.selRemove.delete(t.id); });
+        });
+      }
+    } catch (err) { toast(err.message); }
+    schedulePlan(); renderList();
+  }
+
+  async function surprise(choice) {
+    const d = device();
+    if (!d || !ipodState().can_sync) { toast('Connect an iPod first.'); return; }
+    const planned = state.plan ? Math.max(0, state.plan.bytes.net) : 0;
+    const ceiling = d.free_bytes * 0.92 - planned;
+    const budget = choice === 'fill' ? ceiling : Math.min(Number(choice) * 1e9, ceiling);
+    if (budget <= 0) { toast('The iPod is already full with this selection.'); return; }
+    try {
+      const pool = (await fetchAlbums({ status: 'new', q: '', letter: '', sort: 'artist' }))
+        .filter((a) => !state.selAlbums.has(a.id));
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+      }
+      let used = 0, picked = 0;
+      for (const a of pool) {
+        const remaining = a.tracks - a.on_ipod;
+        const size = a.on_ipod ? a.size * (remaining / a.tracks) : a.size;
+        if (used + size > budget) continue;
+        used += size; picked += 1;
+        state.selAlbums.add(a.id);
+      }
+      toast(picked ? `Picked ${plural(picked, 'album')}, about ${formatBytes(used)}. Review them, then sync.`
+                   : 'Nothing small enough was left to pick.');
+    } catch (err) { toast(err.message); }
+    schedulePlan(); renderList();
+  }
+
+  // ---------- rendering: title bar ----------
   function renderTop() {
     const lib = state.status && state.status.library;
     if (!lib) return;
     const scan = lib.scan;
-    $('#scan-state').textContent = scan.running
-      ? `Scanning ${scan.scanned} of ${scan.total}…` : '';
     $('#btn-rescan').disabled = scan.running;
     $('#lib-count').textContent = lib.tracks ? plural(lib.albums, 'album') : '';
     $('#ipod-count').textContent = device() ? plural(device().tracks, 'song') : '';
-    if (scan.error) toast(`Scan problem: ${scan.error}`);
+    if (scan.error && scan.error !== lastScanError) toast(`Scan problem: ${scan.error}`);
+    lastScanError = scan.error || '';
+    renderLcd();
   }
 
-  function albumRow(album) {
-    const full = album.on_ipod >= album.tracks;
-    const selected = state.selAlbums.has(album.id);
-    const expanded = state.expanded.has(album.id);
-    const partial = album.on_ipod > 0 && !full;
-    const row = h('div', { class: 'row' + (selected ? ' is-selected' : ''), role: 'listitem' },
-      h('input', {
-        type: 'checkbox', checked: selected || full, disabled: full || !device(),
-        'aria-label': `Select ${album.album}`,
-        onchange: (e) => toggleAlbum(album, e.target.checked),
-      }),
-      h('img', {
-        class: 'cover', alt: '', loading: 'lazy', src: `/api/library/cover/${album.id}`,
-        onerror: (e) => {
-          const blank = h('div', { class: 'cover blank', 'aria-hidden': 'true' }, '♪');
-          e.target.replaceWith(blank);
-        },
-      }),
-      h('div', { style: 'min-width:0' },
-        h('div', { class: 'title' }, album.album),
-        h('div', { class: 'sub' }, [album.artist, album.year].filter(Boolean).join(' · '))),
-      h('div', { class: 'side' },
-        full ? h('span', { class: 'state' }, 'On iPod')
-          : partial ? h('span', { class: 'state' }, `${album.on_ipod} of ${album.tracks} on iPod`) : null,
-        `${plural(album.tracks, 'song')} · ${formatBytes(album.size)} `,
-        h('button', {
-          class: 'expand', type: 'button', 'aria-expanded': String(expanded),
-          'aria-label': `${expanded ? 'Hide' : 'Show'} songs in ${album.album}`,
-          onclick: () => toggleExpand(album),
-        }, expanded ? '▾' : '▸')));
-    const nodes = [row];
-    if (expanded) {
-      nodes.push(h('div', { class: 'tracks' }, state.expanded.get(album.id).map((t) =>
-        h('label', { class: 'track' },
-          h('input', {
-            type: 'checkbox', disabled: t.on_ipod || !device(),
-            checked: t.on_ipod || selected || state.selTracks.has(t.id),
-            onchange: (e) => toggleTrack(album, t, e.target.checked),
-          }),
-          h('span', { class: 'num' }, t.track || ''),
-          h('span', { class: 'title' }, t.title, t.on_ipod ? '  · on iPod' : ''),
-          h('span', { class: 'time' }, formatTime(t.duration_ms))))));
+  function renderLcd() {
+    const main = $('#lcd-main'), sub = $('#lcd-sub'), bar = $('#lcd-bar');
+    const lib = state.status && state.status.library;
+    const st = ipodState();
+    let percent = null;
+    if (state.job) {
+      const job = state.job;
+      main.textContent = `${capitalize(job.phase || 'working')}…  ${job.done} of ${job.total}`;
+      sub.textContent = job.current || 'Please keep the iPod connected';
+      percent = job.total ? (job.done / job.total) * 100 : 0;
+    } else if (lib && lib.scan.running) {
+      main.textContent = 'Looking through your music…';
+      sub.textContent = `${lib.scan.scanned} of ${lib.scan.total} files checked`;
+      percent = lib.scan.total ? (lib.scan.scanned / lib.scan.total) * 100 : 0;
+    } else if (st.state === 'ready' && st.device) {
+      main.textContent = `${deviceName(st.device).title} is ready`;
+      sub.textContent = `${plural(st.device.tracks, 'song')} on the iPod · ${lib ? plural(lib.albums, 'album') : '…'} in your library`;
+    } else if (st.state === 'needs_mount') {
+      main.textContent = 'iPod found'; sub.textContent = state.mountError ? 'Could not open it' : 'Opening it…';
+    } else if (st.state === 'error') {
+      main.textContent = 'iPod problem'; sub.textContent = 'See the panel on the right';
+    } else if (st.state === 'disconnected') {
+      main.textContent = 'No iPod connected';
+      sub.textContent = lib && lib.tracks ? `${plural(lib.albums, 'album')} in your library` : 'Plug it into a USB port on your Umbrel';
+    } else {
+      main.textContent = 'Starting…'; sub.textContent = '';
     }
-    return nodes;
+    bar.hidden = percent === null;
+    if (percent !== null) bar.firstElementChild.style.width = `${Math.min(100, Math.max(0, percent))}%`;
   }
 
-  function ipodRow(track) {
-    const selected = state.selRemove.has(track.id);
-    return h('div', { class: 'row' + (selected ? ' is-selected' : ''), role: 'listitem' },
-      h('input', {
-        type: 'checkbox', checked: selected, 'aria-label': `Select ${track.title} to remove`,
-        onchange: (e) => {
-          if (e.target.checked) state.selRemove.add(track.id); else state.selRemove.delete(track.id);
-          schedulePlan(); renderList();
-        },
-      }),
-      h('div', { class: 'cover blank', 'aria-hidden': 'true' }, '♪'),
-      h('div', { style: 'min-width:0' },
-        h('div', { class: 'title' }, track.title),
-        h('div', { class: 'sub' }, [track.artist, track.album].filter(Boolean).join(' · '))),
-      h('div', { class: 'side' }, `${formatTime(track.duration_ms)} · ${formatBytes(track.size)}`));
+  // ---------- rendering: toolbar ----------
+  const LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', '#'];
+
+  function renderToolbar() {
+    const library = state.tab === 'library';
+    const hasDevice = Boolean(device());
+    $('#tab-library').setAttribute('aria-selected', String(library));
+    $('#tab-ipod').setAttribute('aria-selected', String(!library));
+
+    $('#filter').hidden = !(library && hasDevice);
+    const view = effectiveView();
+    $('#filter-new').setAttribute('aria-pressed', String(view === 'new'));
+    $('#filter-all').setAttribute('aria-pressed', String(view === 'all'));
+    $('#filter-new .count').textContent = state.counts.new;
+    $('#filter-all .count').textContent = state.counts.all;
+
+    $('#sort-wrap').hidden = !library;
+    $('#sort').value = state.sort;
+    $('#surprise-wrap').hidden = !(library && hasDevice && ipodState().can_sync);
+    $('#tile-size').value = state.tile;
+    document.body.dataset.tile = state.tile;
+
+    const btn = $('#btn-select-all');
+    btn.textContent = selectionCount() ? 'Clear selection' : (library ? 'Select all' : 'Select all to remove');
+    btn.disabled = !hasDevice || !ipodState().can_sync;
+
+    const nav = $('#letters');
+    const lettersOn = library && (state.sort === 'artist' || state.sort === 'album') &&
+      (state.letters.length > 1 || state.letter);
+    nav.hidden = !lettersOn;
+    nav.replaceChildren();
+    if (lettersOn) {
+      LETTERS.forEach((letter) => nav.append(h('button', {
+        type: 'button', 'aria-pressed': String(state.letter === letter),
+        disabled: !state.letters.includes(letter) && state.letter !== letter,
+        onclick: () => { state.letter = state.letter === letter ? '' : letter; loadAlbums(true); },
+      }, letter)));
+    }
+  }
+
+  // ---------- rendering: tiles ----------
+  function art(title, coverId, hueSeed) {
+    const wrap = h('div', { class: 'art' },
+      h('div', { class: 'blank', 'aria-hidden': 'true', style: `--hue:${hueOf(hueSeed || title)}` }, '♪'));
+    if (coverId) {
+      wrap.append(h('img', {
+        alt: '', loading: 'lazy', src: `/api/library/cover/${coverId}`,
+        onerror: (e) => e.target.remove(),
+      }));
+    }
+    return wrap;
+  }
+
+  function libraryTile(album) {
+    const full = album.on_ipod >= album.tracks;
+    const partial = album.on_ipod > 0 && !full;
+    const selected = state.selAlbums.has(album.id);
+    const canPick = Boolean(device()) && ipodState().can_sync && !full;
+    const cover = art(album.album, album.id, album.id);
+    if (full) cover.append(h('span', { class: 'badge' }, 'On iPod'));
+    else if (partial) {
+      cover.append(h('span', { class: 'badge part', title: `${album.on_ipod} of ${album.tracks} songs are already on the iPod` },
+        `${album.on_ipod}/${album.tracks} on iPod`));
+    }
+    return h('article', { class: 'tile' + (selected ? ' is-selected' : '') + (full ? ' is-done' : ''), 'data-id': album.id },
+      h('label', { class: 'pick', title: full ? 'Already on the iPod' : 'Add to the sync' },
+        h('input', {
+          type: 'checkbox', checked: selected || full, disabled: !canPick,
+          'aria-label': `Select ${album.album}`,
+          onchange: (e) => toggleAlbum(album, e.target.checked),
+        })),
+      h('button', {
+        class: 'open', type: 'button', 'aria-label': `Open ${album.album} by ${album.artist}`,
+        onclick: () => openSheet('library', album),
+      },
+      cover,
+      h('div', { class: 'meta' },
+        h('div', { class: 't', title: album.album }, album.album),
+        h('div', { class: 's' }, [album.artist, album.year].filter(Boolean).join(' · ')),
+        h('div', { class: 'x' }, `${plural(album.tracks, 'song')} · ${formatBytes(album.size)}`))));
+  }
+
+  function ipodTile(album) {
+    const mark = removeState(album);
+    return h('article', { class: 'tile' + (mark !== 'none' ? ' is-selected removing' : ''), 'data-id': album.id },
+      h('label', { class: 'pick', title: 'Mark for removal from the iPod' },
+        h('input', {
+          type: 'checkbox', checked: mark === 'all', indeterminate: mark === 'some',
+          'aria-label': `Remove ${album.album} from the iPod`,
+          onchange: (e) => toggleIpodAlbum(album, e.target.checked),
+        })),
+      h('button', {
+        class: 'open', type: 'button', 'aria-label': `Open ${album.album} by ${album.artist}`,
+        onclick: () => openSheet('ipod', album),
+      },
+      art(album.album, album.cover, album.id),
+      h('div', { class: 'meta' },
+        h('div', { class: 't', title: album.album }, album.album),
+        h('div', { class: 's' }, [album.artist, album.year].filter(Boolean).join(' · ')),
+        h('div', { class: 'x' }, `${plural(album.tracks.length, 'song')} · ${formatBytes(album.size)}`))));
+  }
+
+  // Tiles under artist headings (or one flat grid when the sort order is not by artist).
+  function renderTiles(container, albums, makeTile, grouped, groupAction) {
+    if (!grouped) {
+      container.append(h('div', { class: 'grid' }, albums.map(makeTile)));
+      return;
+    }
+    let group = null, grid = null;
+    const flush = () => {
+      if (!group) return;
+      const action = groupAction(group);
+      container.append(
+        h('div', { class: 'group-head' },
+          h('h3', { title: group.artist }, group.artist),
+          h('span', { class: 'muted' }, plural(group.albums.length, 'album')),
+          action ? h('button', { class: 'btn small', type: 'button', onclick: action.run }, action.label) : null),
+        grid);
+    };
+    for (const album of albums) {
+      if (!group || norm(group.artist) !== norm(album.artist)) {
+        flush();
+        group = { artist: album.artist, albums: [] };
+        grid = h('div', { class: 'grid' });
+      }
+      group.albums.push(album);
+      grid.append(makeTile(album));
+    }
+    flush();
   }
 
   function renderList() {
@@ -377,11 +618,7 @@
     const more = $('#more');
     list.replaceChildren();
     more.replaceChildren();
-    $('#tab-library').setAttribute('aria-selected', String(state.tab === 'library'));
-    $('#tab-ipod').setAttribute('aria-selected', String(state.tab === 'ipod'));
-    $('#btn-select-all').textContent = selectionCount() ? 'Clear selection' : 'Select all';
-    $('#btn-select-all').disabled = state.tab === 'ipod' ? !device() : !device();
-    list.setAttribute('role', 'list');
+    const hasDevice = Boolean(device());
 
     if (state.tab === 'library') {
       const lib = state.status && state.status.library;
@@ -392,6 +629,9 @@
         } else if (state.q) {
           list.append(h('div', { class: 'empty' }, h('strong', {}, 'No matches'),
             'Try a different artist, album or song name.'));
+        } else if (effectiveView() === 'new' && state.counts.all > 0) {
+          list.append(h('div', { class: 'empty' }, h('strong', {}, 'Everything is already on your iPod'),
+            'Nothing left to add. Switch to “All” to browse your whole library, or open the “On iPod” tab.'));
         } else if (lib && !lib.music_dir_exists) {
           list.append(h('div', { class: 'empty' }, h('strong', {}, 'The music folder is not available'),
             'Check that this app has access to your Umbrel’s Downloads folder.'));
@@ -400,25 +640,129 @@
             'Add songs anywhere in your Umbrel’s Downloads folder, then choose Rescan library.'));
         }
       }
-      state.albums.forEach((a) => list.append(...albumRow(a)));
+      renderTiles(list, state.albums, libraryTile, state.sort === 'artist', (group) => {
+        if (!hasDevice || !ipodState().can_sync) return null;
+        const open = group.albums.filter((a) => a.on_ipod < a.tracks);
+        if (!open.length) return null;
+        const allOn = open.every((a) => state.selAlbums.has(a.id));
+        return { label: allOn ? 'Clear' : 'Select all', run: () => selectArtist(group.artist, !allOn) };
+      });
       if (state.albums.length < state.albumTotal) {
-        more.append(h('button', { type: 'button', onclick: () => loadAlbums(false) },
+        more.append(h('button', { class: 'btn', type: 'button', onclick: () => loadAlbums(false) },
           `Show more (${state.albumTotal - state.albums.length} left)`));
       }
     } else {
-      if (!device()) {
+      if (!hasDevice) {
         list.append(h('div', { class: 'empty' }, h('strong', {}, 'No iPod connected'),
           'Songs on the iPod appear here once it is plugged in.'));
-      } else if (!state.ipodTracks.length) {
+      } else if (!state.ipodAlbums.length) {
         list.append(h('div', { class: 'empty' }, h('strong', {}, state.q ? 'No matches' : 'No songs on this iPod'),
-          state.q ? 'Try a different search.' : 'Choose songs from the Library tab to add some.'));
+          state.q ? 'Try a different search.' : 'Choose albums from the Library tab to add some.'));
       }
-      state.ipodTracks.forEach((t) => list.append(ipodRow(t)));
-      if (state.ipodTracks.length < state.ipodTotal) {
-        more.append(h('p', { class: 'muted small' },
-          `Showing ${state.ipodTracks.length} of ${state.ipodTotal}. Search to narrow the list.`));
-      }
+      renderTiles(list, state.ipodAlbums, ipodTile, true, (group) => {
+        if (!ipodState().can_sync) return null;
+        const tracks = group.albums.flatMap((a) => a.tracks);
+        const allOn = tracks.every((t) => state.selRemove.has(t.id));
+        return { label: allOn ? 'Keep all' : 'Remove all', run: () => selectArtist(group.artist, !allOn) };
+      });
     }
+    renderToolbar();
+    setTimeout(maybeLoadMore, 0);
+  }
+
+  function maybeLoadMore() {
+    if (state.tab !== 'library' || state.loadingAlbums || state.albums.length >= state.albumTotal) return;
+    if ($('#more').getBoundingClientRect().top < window.innerHeight + 600) loadAlbums(false);
+  }
+
+  // ---------- rendering: album sheet ----------
+  function closeSheet() {
+    const dlg = $('#sheet');
+    if (dlg.open) dlg.close();
+    state.sheet = null;
+  }
+
+  async function openSheet(kind, album) {
+    try {
+      let tracks;
+      if (kind === 'library') {
+        tracks = (await api(`/api/library/albums/${album.id}/tracks`)).tracks;
+        tracks.forEach((t) => state.trackAlbum.set(t.id, album.id));
+      } else {
+        tracks = album.tracks;
+      }
+      state.sheet = { kind, album, tracks };
+      renderSheet();
+      const dlg = $('#sheet');
+      if (!dlg.open) dlg.showModal();
+    } catch (err) { toast(err.message); }
+  }
+
+  function renderSheet() {
+    if (!state.sheet) return;
+    const { kind, album, tracks } = state.sheet;
+    const body = $('#sheet-body');
+    const canEdit = Boolean(device()) && ipodState().can_sync;
+    const duration = kind === 'library' ? album.duration_ms : album.duration_ms;
+    const size = album.size;
+    const count = kind === 'library' ? album.tracks : album.tracks.length;
+    let action, status = null;
+
+    if (kind === 'library') {
+      const full = album.on_ipod >= album.tracks;
+      const selected = state.selAlbums.has(album.id);
+      if (full) status = 'All of this album is on the iPod.';
+      else if (album.on_ipod) status = `${album.on_ipod} of ${album.tracks} songs are already on the iPod.`;
+      action = h('button', {
+        class: 'btn ' + (selected ? '' : 'primary'), type: 'button', disabled: full || !canEdit,
+        onclick: () => toggleAlbum(album, !selected),
+      }, selected ? 'Remove from sync' : album.on_ipod ? 'Add the rest' : 'Add album to sync');
+    } else {
+      const mark = removeState(album);
+      action = h('button', {
+        class: 'btn ' + (mark === 'all' ? '' : 'danger'), type: 'button', disabled: !canEdit,
+        onclick: () => toggleIpodAlbum(album, mark !== 'all'),
+      }, mark === 'all' ? 'Keep this album' : 'Remove album from iPod');
+    }
+
+    const rows = tracks.map((t) => {
+      if (kind === 'library') {
+        const albumSelected = state.selAlbums.has(album.id);
+        return h('label', { class: 'track' },
+          h('input', {
+            type: 'checkbox', disabled: t.on_ipod || !canEdit,
+            checked: t.on_ipod || albumSelected || state.selTracks.has(t.id),
+            onchange: (e) => toggleTrack(album, t, e.target.checked),
+          }),
+          h('span', { class: 'num' }, t.track || ''),
+          h('span', { class: 'name', title: t.title }, t.title),
+          t.on_ipod ? h('span', { class: 'tag' }, 'On iPod') : h('span', {}),
+          h('span', { class: 'time' }, formatTime(t.duration_ms)));
+      }
+      return h('label', { class: 'track' },
+        h('input', {
+          type: 'checkbox', disabled: !canEdit, checked: state.selRemove.has(t.id),
+          'aria-label': `Remove ${t.title}`,
+          onchange: (e) => toggleIpodTrack(t, e.target.checked),
+        }),
+        h('span', { class: 'num' }, t.track || ''),
+        h('span', { class: 'name', title: t.title }, t.title),
+        h('span', { class: 'time' }, formatBytes(t.size)),
+        h('span', { class: 'time' }, formatTime(t.duration_ms)));
+    });
+
+    body.replaceChildren(
+      h('div', { class: 'sheet-top' },
+        h('div', { class: 'sheet-art' }, art(album.album, kind === 'library' ? album.id : album.cover, album.id)),
+        h('div', { class: 'sheet-info' },
+          h('h2', { id: 'sheet-title' }, album.album),
+          h('div', { class: 'artist' }, album.artist),
+          h('div', { class: 'facts' }, [album.year, plural(count, 'song'), formatBytes(size), formatLength(duration)]
+            .filter(Boolean).join(' · ')),
+          status ? h('div', { class: 'facts' }, status) : null,
+          h('div', { class: 'plan-buttons' }, action)),
+        h('button', { class: 'btn small sheet-close', type: 'button', onclick: closeSheet }, 'Close')),
+      h('div', { class: 'sheet-tracks' }, rows));
   }
 
   // ---------- rendering: the iPod panel ----------
@@ -446,8 +790,7 @@
     } else if (net < 0) {
       legend.push(h('li', {}, 'Frees ', h('b', {}, formatBytes(-net))));
     }
-    legend.push(h('li', {}, h('i', { class: 'swatch', style: 'background:var(--raised);border:1px solid var(--line)' }),
-      'Free ', h('b', {}, formatBytes(freeAfter))));
+    legend.push(h('li', {}, h('i', { class: 'swatch free' }), 'Free ', h('b', {}, formatBytes(freeAfter))));
 
     return h('div', { class: 'capacity' },
       h('div', {
@@ -467,10 +810,10 @@
       h('p', {}, h('strong', {}, `${phase}…`), ` ${job.done} of ${job.total}`),
       h('div', { class: 'progress', role: 'progressbar', 'aria-valuenow': String(percent), 'aria-valuemin': '0', 'aria-valuemax': '100' },
         h('span', { style: `width:${percent}%` })),
-      h('div', { class: 'current' }, job.current || ' '),
+      h('div', { class: 'current' }, job.current || ' '),
       h('div', { class: 'plan-buttons', style: 'margin-top:0.7rem' },
         h('button', {
-          type: 'button', onclick: async () => {
+          class: 'btn', type: 'button', onclick: async () => {
             try { await api('/api/sync/cancel', { method: 'POST' }); toast('Cancelling after the current song…'); }
             catch (err) { toast(err.message); }
           },
@@ -485,18 +828,39 @@
         job.message),
       job.error_count ? h('ul', { class: 'problems' }, job.errors.map((e) => h('li', {}, e))) : null,
       h('div', { class: 'plan-buttons', style: 'margin-top:0.7rem' },
-        h('button', { type: 'button', onclick: () => { state.finishedJob = null; renderPod(); } }, 'Dismiss')));
+        h('button', { class: 'btn', type: 'button', onclick: () => { state.finishedJob = null; renderPod(); } }, 'Dismiss')));
+  }
+
+  function basketBlock() {
+    const ids = [...state.selAlbums];
+    if (!ids.length && !state.selTracks.size) return null;
+    const shown = ids.slice(0, 12);
+    return h('div', {},
+      h('div', { class: 'basket', 'aria-label': 'Selected albums' },
+        shown.map((id) => {
+          const info = state.info.get(id) || { album: 'Album', artist: '' };
+          return h('button', {
+            class: 'thumb', type: 'button', title: `${info.album}: click to remove from the sync`,
+            'aria-label': `Remove ${info.album} from the sync`,
+            onclick: () => toggleAlbum({ id }, false),
+          },
+          h('div', { class: 'blank', 'aria-hidden': 'true', style: `--hue:${hueOf(id)}` }, '♪'),
+          h('img', { alt: '', src: `/api/library/cover/${id}`, onerror: (e) => e.target.remove() }));
+        }),
+        ids.length > shown.length ? h('span', { class: 'thumb-more' }, `+${ids.length - shown.length} more`) : null,
+        state.selTracks.size ? h('span', { class: 'thumb-more' }, `+ ${plural(state.selTracks.size, 'single song')}`) : null));
   }
 
   function planBlock() {
     const plan = state.plan;
     if (!selectionCount()) {
       return h('div', { class: 'plan' }, h('p', { class: 'none' },
-        state.tab === 'library' ? 'Choose albums or songs to put on the iPod.'
-          : 'Tick songs to remove them from the iPod.'));
+        state.tab === 'library' ? 'Tick albums (or open one to pick single songs) to put on the iPod.'
+          : 'Tick albums or songs to remove them from the iPod.'));
     }
-    if (state.planError) return h('div', { class: 'plan' }, h('div', { class: 'notice error' }, state.planError));
-    if (!plan) return h('div', { class: 'plan' }, h('p', { class: 'none' }, 'Working out what to copy…'));
+    const clear = h('button', { class: 'btn link', type: 'button', onclick: () => { clearSelection(); schedulePlan(); renderList(); renderSheet(); } }, 'Clear selection');
+    if (state.planError) return h('div', { class: 'plan' }, h('div', { class: 'notice error' }, state.planError), h('p', {}, clear));
+    if (!plan) return h('div', { class: 'plan' }, basketBlock(), h('p', { class: 'none' }, 'Working out what to copy…'));
 
     const c = plan.counts;
     const bits = [];
@@ -508,12 +872,20 @@
     const label = c.add && c.remove ? 'Apply changes' : c.remove ? 'Remove from iPod' : 'Sync now';
     const canSync = ipodState().can_sync && actionable && plan.fits;
     return h('div', { class: 'plan' },
+      basketBlock(),
       h('p', {}, bits.length ? bits.join(', ') + '.' : 'Nothing new to copy.'),
       !plan.fits ? h('div', { class: 'notice error' }, h('strong', {}, 'Not enough space'),
         `This needs ${formatBytes(plan.bytes.net)} but only ${formatBytes(plan.bytes.free)} is free. ` +
         'Choose fewer songs or remove some from the iPod.') : null,
-      h('div', { class: 'plan-buttons' },
-        h('button', { class: 'primary', type: 'button', disabled: !canSync, onclick: startSync }, label)));
+      h('div', { class: 'plan-buttons', style: !plan.fits ? 'margin-top:0.7rem' : '' },
+        h('button', { class: 'btn primary', type: 'button', disabled: !canSync, onclick: startSync }, label), clear));
+  }
+
+  function podShell(title, subtitle, ...body) {
+    return [
+      h('div', { class: 'pod-head' }, h('h2', {}, title), subtitle ? h('p', { class: 'model' }, subtitle) : null),
+      h('div', { class: 'pod-body' }, ...body),
+    ];
   }
 
   function renderPod() {
@@ -522,49 +894,46 @@
     const st = ipodState();
 
     if (st.state === 'unknown') {
-      pod.append(h('p', { class: 'waiting' }, 'Looking for your iPod…'));
+      pod.append(...podShell('iPod', '', h('p', { class: 'waiting' }, 'Looking for your iPod…')));
       return;
     }
     if (st.state === 'disconnected') {
-      pod.append(h('h2', {}, 'No iPod connected'), h('p', { class: 'waiting' },
-        'Plug the iPod into a USB port on your Umbrel. This panel updates when it appears.'));
+      pod.append(...podShell('No iPod connected', '', h('p', { class: 'waiting' },
+        'Plug the iPod into a USB port on your Umbrel. This panel updates when it appears.')));
       return;
     }
     if (st.state === 'needs_mount') {
-      pod.append(h('h2', {}, 'iPod found'));
-      if (state.mountError) {
-        pod.append(h('div', { class: 'notice error' }, h('strong', {}, 'Could not open the iPod'), state.mountError),
+      const body = state.mountError
+        ? [h('div', { class: 'notice error' }, h('strong', {}, 'Could not open the iPod'), state.mountError),
           h('div', { class: 'plan-buttons', style: 'margin-top:0.8rem' },
-            h('button', { type: 'button', onclick: () => { state.mountError = ''; mountIpod(); } }, 'Try again')));
-      } else {
-        pod.append(h('p', { class: 'waiting' }, 'Opening it…'));
-      }
+            h('button', { class: 'btn', type: 'button', onclick: () => { state.mountError = ''; mountIpod(); } }, 'Try again'))]
+        : [h('p', { class: 'waiting' }, 'Opening it…')];
+      pod.append(...podShell('iPod found', '', ...body));
       return;
     }
     if (st.state === 'error') {
-      pod.append(h('h2', {}, 'iPod problem'), h('div', { class: 'notice error' }, st.message));
+      pod.append(...podShell('iPod problem', '', h('div', { class: 'notice error', style: 'margin-top:0' }, st.message)));
       return;
     }
 
     const d = st.device;
     const name = deviceName(d);
-    pod.append(
-      h('h2', {}, name.title),
-      h('p', { class: 'model' }, [name.generation, d.capacity_gb ? `${d.capacity_gb} GB` : null, capitalize(d.color),
-        st.filesystem === 'vfat' ? 'Windows format' : st.filesystem && st.filesystem.startsWith('hfs') ? 'Mac format' : null]
-        .filter(Boolean).join(' · ')),
-      capacityBar());
+    const subtitle = [name.generation, d.capacity_gb ? `${d.capacity_gb} GB` : null, capitalize(d.color),
+      st.filesystem === 'vfat' ? 'Windows format' : st.filesystem && st.filesystem.startsWith('hfs') ? 'Mac format' : null]
+      .filter(Boolean).join(' · ');
+    const body = [capacityBar()];
 
-    st.problems.forEach((p) => pod.append(
+    st.problems.forEach((p) => body.push(
       h('div', { class: 'notice' + (p.blocking ? ' error' : '') }, h('strong', {}, p.title), p.detail)));
 
-    if (state.job) pod.append(jobBlock(state.job));
-    else if (state.finishedJob) pod.append(finishedBlock(state.finishedJob));
-    else if (st.can_sync) pod.append(planBlock());
+    if (state.job) body.push(jobBlock(state.job));
+    else if (state.finishedJob) body.push(finishedBlock(state.finishedJob));
+    else if (st.can_sync) body.push(planBlock());
 
-    pod.append(h('div', { class: 'pod-footer' },
+    body.push(h('div', { class: 'pod-footer' },
       h('span', { class: 'muted small' }, plural(d.tracks, 'song')),
-      h('button', { type: 'button', disabled: Boolean(state.job), onclick: ejectIpod }, 'Eject')));
+      h('button', { class: 'btn', type: 'button', disabled: Boolean(state.job), onclick: ejectIpod }, 'Eject')));
+    pod.append(...podShell(name.title, subtitle, ...body));
   }
 
   // ---------- settings ----------
@@ -600,7 +969,7 @@
     backups.forEach((b) => list.append(h('li', {},
       h('span', {}, `${new Date(b.taken * 1000).toLocaleString()} · ${formatBytes(b.size)}`),
       h('button', {
-        type: 'button', onclick: async () => {
+        class: 'btn small', type: 'button', onclick: async () => {
           if (!confirm('Restore this backup of the iPod’s music database?')) return;
           try {
             await api('/api/backups/restore', { method: 'POST', body: { id: b.id } });
@@ -613,13 +982,34 @@
   }
 
   // ---------- wiring ----------
+  function switchTab(tab) {
+    if (state.tab === tab) return;
+    state.tab = tab;
+    renderToolbar();
+    reloadList();
+    schedulePlan();
+  }
+
   function init() {
-    $('#tab-library').addEventListener('click', () => { state.tab = 'library'; reloadList(); schedulePlan(); });
-    $('#tab-ipod').addEventListener('click', () => { state.tab = 'ipod'; reloadList(); schedulePlan(); });
+    $('#tab-library').addEventListener('click', () => switchTab('library'));
+    $('#tab-ipod').addEventListener('click', () => switchTab('ipod'));
     let searchTimer = null;
     $('#q').addEventListener('input', (e) => {
       clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => { state.q = e.target.value.trim(); reloadList(); }, 250);
+      searchTimer = setTimeout(() => { state.q = e.target.value.trim(); state.letter = ''; reloadList(); }, 250);
+    });
+    $('#filter-new').addEventListener('click', () => { state.view = 'new'; prefs.set('view', 'new'); state.letter = ''; loadAlbums(true); });
+    $('#filter-all').addEventListener('click', () => { state.view = 'all'; prefs.set('view', 'all'); state.letter = ''; loadAlbums(true); });
+    $('#sort').addEventListener('change', (e) => { state.sort = e.target.value; prefs.set('sort', state.sort); state.letter = ''; loadAlbums(true); });
+    $('#tile-size').addEventListener('input', (e) => {
+      state.tile = e.target.value; prefs.set('tile', state.tile);
+      document.body.dataset.tile = state.tile;
+      setTimeout(maybeLoadMore, 0);
+    });
+    $('#surprise').addEventListener('change', (e) => {
+      const choice = e.target.value;
+      e.target.value = '';
+      if (choice) surprise(choice);
     });
     $('#btn-select-all').addEventListener('click', selectAll);
     $('#btn-rescan').addEventListener('click', async () => {
@@ -632,7 +1022,19 @@
     $('#set-artwork').addEventListener('change', (e) => saveSetting({ artwork: e.target.checked }));
     $('#set-force').addEventListener('change', (e) => saveSetting({ hfs_force_rw: e.target.checked }));
 
-    renderPod(); renderList();
+    const sheet = $('#sheet');
+    sheet.addEventListener('close', () => { state.sheet = null; });
+    sheet.addEventListener('click', (e) => { if (e.target === sheet) closeSheet(); });
+
+    window.addEventListener('scroll', maybeLoadMore, { passive: true });
+    document.addEventListener('keydown', (e) => {
+      const typing = e.target.matches &&
+        e.target.matches('textarea, select, input:not([type=range]):not([type=checkbox]):not([type=radio])');
+      if (e.key === '/' && !typing && !e.metaKey && !e.ctrlKey) { e.preventDefault(); $('#q').focus(); }
+    });
+
+    document.body.dataset.tile = state.tile;
+    renderToolbar(); renderPod(); renderList(); renderLcd();
     refreshStatus();
     setInterval(() => { if (!state.job) refreshStatus(); }, 4000);
     // While the library is scanned, show new albums as they appear.

@@ -5,12 +5,17 @@ Built for the **iPod nano 5th generation** (the one with the camera). It uses
 [libgpod](https://sourceforge.net/projects/gtkpod/), the same library that Rhythmbox and gtkpod use to
 write an iPod's music database.
 
-- Browse the music in your Umbrel's Downloads folder by album, search it, pick albums or single songs.
+- Browse the music in your Umbrel's Downloads folder as album tiles, grouped under artist headings.
+  Search, sort (artist, album, newest year, recently added, biggest), jump by letter, and resize the tiles.
+- Albums that are already on the iPod are kept apart: the Library tab defaults to **To add**, and the
+  **On iPod** tab shows what is on the device. Partly copied albums are flagged.
+- Open an album to pick single songs. Select a whole artist with one click. "Surprise me" picks random
+  albums to fill about 1, 2 or 4 GB, or the whole iPod.
 - See the space a sync will use before you start (capacity bar in your iPod's own case colour).
 - FLAC, Ogg, Opus, WMA and other formats the iPod can't play are converted to AAC. MP3 and AAC are copied untouched.
 - Album covers are copied across.
 - The iPod's database is backed up before every sync and can be restored from Settings.
-- Songs already on the iPod are recognised and skipped; you can also remove songs from the iPod.
+- Songs already on the iPod are recognised and skipped; you can also remove albums or songs from the iPod.
 
 ## What has and hasn't been tested
 
@@ -60,7 +65,8 @@ change or delete your files.
 ## Using it
 
 1. Plug the iPod into the Umbrel and open the app. The panel on the right shows the iPod once it is opened.
-2. Pick albums (or expand one to pick songs). The panel shows what will be copied and whether it fits.
+2. Tick albums (or click one to pick songs). The panel shows what will be copied and whether it fits.
+   Press `/` to jump to the search box.
 3. **Sync now.** Wait for "Sync finished", then **Eject** and unplug.
 
 ## Safety

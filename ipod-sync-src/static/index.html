@@ -3,17 +3,39 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
   <title>iPod Sync</title>
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <header class="top">
-    <h1>iPod Sync</h1>
+    <div class="brand">
+      <svg class="orb" viewBox="0 0 40 40" aria-hidden="true">
+        <defs>
+          <radialGradient id="orb-g" cx="40%" cy="30%" r="75%">
+            <stop offset="0" stop-color="#b9e4ff"/>
+            <stop offset="0.55" stop-color="#2b8cf0"/>
+            <stop offset="1" stop-color="#0b4aa8"/>
+          </radialGradient>
+        </defs>
+        <circle cx="20" cy="20" r="18" fill="url(#orb-g)" stroke="#0b3f93" stroke-width="1.5"/>
+        <ellipse cx="20" cy="11" rx="12" ry="7" fill="#fff" opacity="0.5"/>
+        <path d="M23 11v13.2a3.6 3.6 0 1 1-2-3.2V14.5l-6 1.4v9.3a3.6 3.6 0 1 1-2-3.2V13.6z"
+              fill="#fff" transform="translate(3 3) scale(.8)"/>
+      </svg>
+      <h1>iPod Sync</h1>
+    </div>
+
+    <div class="lcd" role="status" aria-live="polite">
+      <div id="lcd-main" class="lcd-main">Starting…</div>
+      <div id="lcd-sub" class="lcd-sub"></div>
+      <div id="lcd-bar" class="lcd-bar" hidden><span></span></div>
+    </div>
+
     <div class="top-actions">
-      <span id="scan-state" class="muted" role="status"></span>
-      <button id="btn-rescan" class="quiet" type="button">Rescan library</button>
-      <button id="btn-settings" class="quiet" type="button">Settings</button>
+      <button id="btn-rescan" class="btn" type="button">Rescan library</button>
+      <button id="btn-settings" class="btn" type="button">Settings</button>
     </div>
   </header>
 
@@ -27,11 +49,43 @@
           On iPod <span id="ipod-count" class="count"></span>
         </button>
       </div>
-      <div class="searchbar">
-        <input id="q" type="search" placeholder="Search your music"
+
+      <div class="toolbar">
+        <input id="q" class="search" type="search" placeholder="Search artists, albums, songs"
                aria-label="Search" autocomplete="off">
-        <button id="btn-select-all" class="quiet" type="button">Select all</button>
+        <div id="filter" class="seg" role="group" aria-label="Show">
+          <button id="filter-new" type="button" aria-pressed="true">To add <span class="count"></span></button>
+          <button id="filter-all" type="button" aria-pressed="false">All <span class="count"></span></button>
+        </div>
       </div>
+
+      <div class="toolbar tools">
+        <label id="sort-wrap" class="tool">Sort
+          <select id="sort" class="menu">
+            <option value="artist">Artist A–Z</option>
+            <option value="album">Album A–Z</option>
+            <option value="year">Newest year</option>
+            <option value="recent">Recently added</option>
+            <option value="size">Biggest first</option>
+          </select>
+        </label>
+        <label class="tool">Tiles
+          <input id="tile-size" type="range" min="1" max="3" step="1" value="2" aria-label="Tile size">
+        </label>
+        <label id="surprise-wrap" class="tool">Surprise me
+          <select id="surprise" class="menu" aria-label="Pick random albums">
+            <option value="">Pick albums…</option>
+            <option value="1">About 1 GB</option>
+            <option value="2">About 2 GB</option>
+            <option value="4">About 4 GB</option>
+            <option value="fill">Fill the iPod</option>
+          </select>
+        </label>
+        <button id="btn-select-all" class="btn small" type="button">Select all</button>
+      </div>
+
+      <nav id="letters" class="letters" aria-label="Jump to letter" hidden></nav>
+
       <div id="list" class="list"></div>
       <div id="more" class="more"></div>
     </section>
@@ -39,13 +93,17 @@
     <aside id="pod" class="pod" aria-label="iPod"></aside>
   </main>
 
+  <dialog id="sheet" class="album-sheet" aria-labelledby="sheet-title">
+    <div id="sheet-body"></div>
+  </dialog>
+
   <dialog id="settings" aria-labelledby="settings-title">
     <form method="dialog" class="sheet">
       <h2 id="settings-title">Settings</h2>
 
       <label class="field">
         <span>Quality of converted songs</span>
-        <select id="set-bitrate">
+        <select id="set-bitrate" class="menu wide">
           <option value="128">128 kbit/s (smallest)</option>
           <option value="192">192 kbit/s</option>
           <option value="256">256 kbit/s (recommended)</option>
@@ -75,7 +133,7 @@
       <ul id="backup-list" class="backups"></ul>
 
       <div class="actions">
-        <button value="close" class="primary">Done</button>
+        <button value="close" class="btn primary">Done</button>
       </div>
     </form>
   </dialog>

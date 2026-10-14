@@ -2,7 +2,7 @@ manifestVersion: 1
 id: patriot-ipod-sync
 category: media
 name: iPod Sync
-version: "1.0.0"
+version: "1.1.0"
 tagline: Put music from your Umbrel on an iPod nano
 description: >-
   Browse the music stored on your Umbrel and copy it to an iPod plugged into
@@ -35,7 +35,9 @@ port: 8741
 gallery: []
 path: ""
 releaseNotes: >-
-  First release.
+  A new look: album tiles grouped by artist, sorting and A-Z jump, songs already on
+  the iPod kept apart from songs still to add, a Surprise me picker, and a page for
+  each album where you can choose single songs.
 submitter: PatriotCrypto
 permissions:
   - STORAGE_DOWNLOADS
