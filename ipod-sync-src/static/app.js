@@ -444,7 +444,7 @@
     if (!lib) return;
     const scan = lib.scan;
     $('#btn-rescan').disabled = scan.running;
-    $('#lib-count').textContent = lib.tracks ? plural(lib.albums, 'album') : '';
+    $('#lib-count').textContent = lib.tracks ? `${plural(lib.albums, 'album')} · ${plural(lib.tracks, 'song')}` : '';
     $('#ipod-count').textContent = device() ? plural(device().tracks, 'song') : '';
     if (scan.error && scan.error !== lastScanError) toast(`Scan problem: ${scan.error}`);
     lastScanError = scan.error || '';
@@ -467,14 +467,14 @@
       percent = lib.scan.total ? (lib.scan.scanned / lib.scan.total) * 100 : 0;
     } else if (st.state === 'ready' && st.device) {
       main.textContent = `${deviceName(st.device).title} is ready`;
-      sub.textContent = `${plural(st.device.tracks, 'song')} on the iPod · ${lib ? plural(lib.albums, 'album') : '…'} in your library`;
+      sub.textContent = `${plural(st.device.tracks, 'song')} on the iPod · ${lib ? `${plural(lib.albums, 'album')}, ${plural(lib.tracks, 'song')}` : '…'} in your library`;
     } else if (st.state === 'needs_mount') {
       main.textContent = 'iPod found'; sub.textContent = state.mountError ? 'Could not open it' : 'Opening it…';
     } else if (st.state === 'error') {
       main.textContent = 'iPod problem'; sub.textContent = 'See the panel on the right';
     } else if (st.state === 'disconnected') {
       main.textContent = 'No iPod connected';
-      sub.textContent = lib && lib.tracks ? `${plural(lib.albums, 'album')} in your library` : 'Plug it into a USB port on your Umbrel';
+      sub.textContent = lib && lib.tracks ? `${plural(lib.albums, 'album')}, ${plural(lib.tracks, 'song')} in your library` : 'Plug it into a USB port on your Umbrel';
     } else {
       main.textContent = 'Starting…'; sub.textContent = '';
     }

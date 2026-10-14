@@ -454,3 +454,9 @@ body.has-player { padding-bottom: 5.4rem; }
   .pl-volume { display: none; }
   body.has-player { padding-bottom: 8rem; }
 }
+
+.tab { white-space: nowrap; }
+@media (max-width: 760px) {
+  .tab { line-height: 1.15; padding-top: 0.35rem; padding-bottom: 0.35rem; }
+  .tab .count { display: block; font-size: 0.8rem; }
+}
