@@ -8,7 +8,7 @@ import threading
 import time
 import unicodedata
 
-from . import audio, config
+from . import audio, config, genres
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tracks (
@@ -193,7 +193,7 @@ def letter_of(text):
 
 
 def list_albums(query="", limit=60, offset=0, ipod_keys=None, sort="artist",
-                status="all", letter="", artist=""):
+                status="all", letter="", artist="", genre=""):
     """Albums as tiles. `status`: all, new (something still to add) or on (anything on the
     iPod). `letter` filters by the first letter of the artist (sort=artist) or album."""
     ipod_keys = ipod_keys or set()
@@ -213,6 +213,7 @@ def list_albums(query="", limit=60, offset=0, ipod_keys=None, sort="artist",
         where = "WHERE " + " AND ".join(clauses)
     conn = connect()
     try:
+        _, album_genres = genre_maps(conn)
         rows = conn.execute(
             f"""SELECT album_key, MIN(album) AS album,
                        MIN(CASE WHEN albumartist != '' THEN albumartist END) AS albumartist,
@@ -238,7 +239,12 @@ def list_albums(query="", limit=60, offset=0, ipod_keys=None, sort="artist",
             "year": r["year"] or None, "tracks": r["tracks"],
             "duration_ms": r["duration_ms"] or 0, "size": r["size"] or 0,
             "on_ipod": on_ipod.get(r["album_key"], 0), "added": int(r["added"] or 0),
+            "genre": album_genres.get(r["album_key"], genres.UNSORTED),
         })
+
+    if genre:
+        wanted = _norm(genre)
+        albums = [a for a in albums if _norm(a["genre"]) == wanted]
 
     counts = {"all": len(albums),
               "new": sum(1 for a in albums if a["on_ipod"] < a["tracks"]),
@@ -286,6 +292,113 @@ def album_keys_for(track_keys):
         conn.close()
 
 
+# ---------- genres ----------
+
+_genre_cache = {"sig": None, "tracks": {}, "albums": {}}
+
+
+def genre_maps(conn=None):
+    """({track id: genre}, {album key: genre}). Tags are tidied into broad genres, and a
+    song without a usable tag borrows the most common genre on its album."""
+    own = conn is None
+    conn = conn or connect()
+    try:
+        sig = tuple(conn.execute("SELECT COUNT(*), COALESCE(SUM(mtime),0), COALESCE(SUM(size),0) "
+                                 "FROM tracks").fetchone())
+        if _genre_cache["sig"] == sig:
+            return _genre_cache["tracks"], _genre_cache["albums"]
+        per_track, votes = {}, {}
+        rows = conn.execute("SELECT id, album_key, genre FROM tracks").fetchall()
+        for r in rows:
+            name = genres.canonical(r["genre"])
+            per_track[r["id"]] = (r["album_key"], name)
+            if name:
+                tally = votes.setdefault(r["album_key"], {})
+                tally[name] = tally.get(name, 0) + 1
+        albums = {key: max(sorted(tally), key=lambda g: tally[g]) for key, tally in votes.items()}
+        tracks = {tid: (name or albums.get(akey) or genres.UNSORTED)
+                  for tid, (akey, name) in per_track.items()}
+        _genre_cache.update(sig=sig, tracks=tracks, albums=albums)
+        return tracks, albums
+    finally:
+        if own:
+            conn.close()
+
+
+def list_genres():
+    """Genre shelves with counts and a cover to show, biggest first, 'Unsorted' last."""
+    conn = connect()
+    try:
+        by_track, by_album = genre_maps(conn)
+        shelves = {}
+        for r in conn.execute("SELECT id, album_key, size, duration_ms FROM tracks"):
+            name = by_track.get(r["id"], genres.UNSORTED)
+            g = shelves.setdefault(name, {"name": name, "tracks": 0, "size": 0, "duration_ms": 0,
+                                          "albums": {}})
+            g["tracks"] += 1
+            g["size"] += r["size"] or 0
+            g["duration_ms"] += r["duration_ms"] or 0
+            g["albums"][r["album_key"]] = g["albums"].get(r["album_key"], 0) + 1
+    finally:
+        conn.close()
+    out = []
+    for g in shelves.values():
+        albums = g.pop("albums")
+        g["album_count"] = len(albums)
+        g["covers"] = [k for k, _ in sorted(albums.items(), key=lambda kv: (-kv[1], kv[0]))[:4]]
+        out.append(g)
+    out.sort(key=lambda g: (g["name"] == genres.UNSORTED, -g["tracks"], g["name"].lower()))
+    return out
+
+
+TRACK_SORTS = ("artist", "title", "album", "recent", "length")
+
+
+def list_tracks(query="", genre="", sort="artist", limit=200, offset=0):
+    """Every song as a flat list (the Songs view and 'play everything')."""
+    limit = max(1, min(int(limit), 5000))
+    offset = max(0, int(offset))
+    sort = sort if sort in TRACK_SORTS else "artist"
+    where, args = "", []
+    terms = [t for t in _norm(query).split(" ") if t]
+    if terms:
+        where = "WHERE " + " AND ".join(
+            "lower(album || ' ' || artist || ' ' || title || ' ' || COALESCE(genre,'')) LIKE ?"
+            for _ in terms)
+        args = [f"%{t}%" for t in terms]
+    conn = connect()
+    try:
+        by_track, _ = genre_maps(conn)
+        rows = conn.execute(f"SELECT * FROM tracks {where}", args).fetchall()
+    finally:
+        conn.close()
+    wanted = _norm(genre)
+    items = []
+    for r in rows:
+        g = by_track.get(r["id"], genres.UNSORTED)
+        if wanted and _norm(g) != wanted:
+            continue
+        items.append({
+            "id": r["id"], "title": r["title"] or "", "artist": r["artist"] or "",
+            "album": r["album"] or "", "album_key": r["album_key"], "genre": g,
+            "track": r["track"] or 0, "disc": r["disc"] or 1, "year": r["year"] or None,
+            "duration_ms": r["duration_ms"] or 0, "codec": r["codec"], "bitrate": r["bitrate"] or 0,
+            "size": r["size"] or 0, "added": int(r["mtime"] or 0),
+        })
+    by_artist = lambda t: (_fold(t["artist"]), _fold(t["album"]), t["disc"], t["track"], _fold(t["title"]))
+    if sort == "title":
+        items.sort(key=lambda t: (_fold(t["title"]),) + by_artist(t))
+    elif sort == "album":
+        items.sort(key=lambda t: (_fold(t["album"]), t["disc"], t["track"], _fold(t["title"])))
+    elif sort == "recent":
+        items.sort(key=lambda t: (-t["added"],) + by_artist(t))
+    elif sort == "length":
+        items.sort(key=lambda t: (-t["duration_ms"],) + by_artist(t))
+    else:
+        items.sort(key=by_artist)
+    return {"total": len(items), "tracks": items[offset:offset + limit]}
+
+
 def album_tracks(key, ipod_keys=None):
     ipod_keys = ipod_keys or set()
     conn = connect()
@@ -297,6 +410,7 @@ def album_tracks(key, ipod_keys=None):
             "id": r["id"], "title": r["title"], "artist": r["artist"], "track": r["track"],
             "disc": r["disc"], "duration_ms": r["duration_ms"], "codec": r["codec"],
             "size": r["size"], "on_ipod": r["key"] in ipod_keys,
+            "album": r["album"], "album_key": r["album_key"],
         } for r in rows]
     finally:
         conn.close()

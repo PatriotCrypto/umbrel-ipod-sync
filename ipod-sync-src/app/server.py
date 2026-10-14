@@ -5,7 +5,7 @@ import time
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 
-from . import audio, config, ipod, library, sync
+from . import audio, config, dupes, ipod, library, sync
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static")
 MAX_IDS = 20000
@@ -55,6 +55,10 @@ def create_app(start_scan=True):
 
     @app.errorhandler(ipod.IpodError)
     def _ipod_error(exc):
+        return jsonify(error=str(exc)), 409
+
+    @app.errorhandler(dupes.DupeError)
+    def _dupe_error(exc):
         return jsonify(error=str(exc)), 409
 
     @app.errorhandler(ValueError)
@@ -130,7 +134,41 @@ def create_app(start_scan=True):
             request.args.get("q", ""), request.args.get("limit", 60),
             request.args.get("offset", 0), keys, sort=request.args.get("sort", "artist"),
             status=request.args.get("status", "all"), letter=request.args.get("letter", ""),
-            artist=request.args.get("artist", "")))
+            artist=request.args.get("artist", ""), genre=request.args.get("genre", "")))
+
+    @app.get("/api/library/genres")
+    def genres_list():
+        return jsonify(genres=library.list_genres())
+
+    @app.get("/api/library/tracks")
+    def tracks_list():
+        return jsonify(library.list_tracks(
+            request.args.get("q", ""), request.args.get("genre", ""),
+            request.args.get("sort", "artist"), request.args.get("limit", 200),
+            request.args.get("offset", 0)))
+
+    @app.get("/api/library/duplicates")
+    def duplicates():
+        return jsonify(dupes.scan_duplicates())
+
+    @app.post("/api/library/duplicates/delete")
+    def duplicates_delete():
+        body = request.get_json(silent=True) or {}
+        result = dupes.trash_duplicates(_ids(body, "ids", int))
+        return jsonify(dict(result, trash=dupes.trash_info()))
+
+    @app.post("/api/library/trash/restore")
+    def trash_restore():
+        result = dupes.restore_trash()
+        library.start_scan()
+        return jsonify(dict(result, trash=dupes.trash_info()))
+
+    @app.post("/api/library/trash/empty")
+    def trash_empty():
+        body = request.get_json(silent=True) or {}
+        if body.get("confirm") is not True:
+            raise ValueError("confirmation missing")
+        return jsonify(emptied=dupes.empty_trash(), trash=dupes.trash_info())
 
     @app.get("/api/library/albums/<key>/tracks")
     def album_tracks(key):

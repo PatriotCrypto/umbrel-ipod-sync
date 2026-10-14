@@ -29,8 +29,9 @@ services:
     volumes:
       # Live device nodes, so an iPod plugged in later is visible.
       - /dev:/dev
-      # Your Umbrel's Downloads folder, read only. Music is found anywhere inside.
-      - ${UMBREL_ROOT}/data/storage/downloads:/music:ro
+      # Your Umbrel's Downloads folder. Music is found anywhere inside. uPod only writes here
+      # when you remove duplicates (files are moved to a .ipod-trash folder, never erased).
+      - ${UMBREL_ROOT}/data/storage/downloads:/music
       # Library index, album covers, settings and iPod database backups.
       - ${APP_DATA_DIR}/data:/data
     environment:

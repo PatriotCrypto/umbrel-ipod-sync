@@ -1,4 +1,4 @@
-# iPod Sync for Umbrel. Built for linux/amd64 and linux/arm64 by the GitHub workflow.
+# uPod for Umbrel. Built for linux/amd64 and linux/arm64 by the GitHub workflow.
 #
 # The libgpod version in Debian bookworm (0.8.3) is the one this app was
 # developed and tested against.

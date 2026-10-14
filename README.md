@@ -1,6 +1,8 @@
-# iPod Sync for Umbrel
+# uPod for Umbrel
 
-An Umbrel app that copies music from your Umbrel onto an iPod plugged into its USB port.
+uPod (Umbrel iPod, or Your iPod) is a music player and retro visualizer for the music on your Umbrel, and it still copies that music onto an iPod plugged into the Umbrel's USB port.
+
+New in this version: a full player with early-2000s style visualizations (full screen, auto-change), a playlist, skins, automatic genre sorting, a Songs list, and a one-button **Duplicates** finder that moves extra copies of the same song and artist to a hidden `.ipod-trash` folder (restore or empty it any time; one copy always stays).
 Built for the **iPod nano 5th generation** (the one with the camera). It uses
 [libgpod](https://sourceforge.net/projects/gtkpod/), the same library that Rhythmbox and gtkpod use to
 write an iPod's music database.
@@ -56,11 +58,11 @@ You need a free GitHub account. The Umbrel pulls a ready-made image, which GitHu
    Public**. (The Umbrel can't pull a private image.)
 5. In Umbrel: open the **App Store**, find its **Community App Stores** option (menu labels vary a little
    between umbrelOS versions) and add `https://github.com/<you>/umbrel-ipod-sync`. Then install
-   **iPod Sync** from "Patriot Apps".
+   **uPod** from "Patriot Apps".
 6. The store listing already points at the icon in this repository.
 
-Put music anywhere inside your Umbrel's **Downloads** folder; it is mounted read-only, so the app can never
-change or delete your files.
+Put music anywhere inside your Umbrel's **Downloads** folder; it is mounted read-write only so duplicates can be moved to
+`.ipod-trash` inside it. Nothing else is ever changed, and nothing is erased until you empty the trash.
 
 ## Using it
 

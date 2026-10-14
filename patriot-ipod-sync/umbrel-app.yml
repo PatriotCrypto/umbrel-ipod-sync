@@ -1,31 +1,37 @@
 manifestVersion: 1
 id: patriot-ipod-sync
 category: media
-name: iPod Sync
+name: uPod
 version: "1.3.0"
-tagline: Put music from your Umbrel on an iPod nano
+tagline: Your music player, visualizer and iPod sync, all on your Umbrel
 description: >-
-  Browse the music stored on your Umbrel and copy it to an iPod plugged into
-  the Umbrel's USB port. Pick albums or single songs, see how much space they
-  will use, and sync with one click.
+  uPod is a music player and nostalgic visualizer for the music on your Umbrel, with the
+  original trick kept: plug in an old iPod and copy music onto it.
 
 
-  Songs the iPod cannot play (FLAC, Ogg, Opus and similar) are converted to AAC
-  on the way, album covers are copied across, and the iPod's music database is
-  backed up before every sync so a bad write can be undone.
+  Play your library in the browser with full-screen visualizations in the style of the
+  early-2000s media players, a playlist, and skins. Your music is sorted by genre
+  automatically, even when the tags are messy.
 
 
-  Built and tested for the iPod nano 5th generation. Other iPods that libgpod
-  supports (classic, video, nano 1st to 4th generation) should work too.
+  One button finds songs that appear more than once (same title and artist, for example
+  songs repeated across albums) and lets you move the extra copies to a trash folder.
+  One copy of every song always stays, and the trash can be restored or emptied.
 
 
-  Your music is found in the Downloads folder: add songs anywhere inside it and
-  choose Rescan library. The app only reads that folder and never changes it.
+  Copying to an iPod works as before: pick albums or single songs, see the space they will
+  use, and sync. Songs the iPod cannot play (FLAC, Ogg, Opus) are converted to AAC, covers are
+  copied, and the iPod's database is backed up before every sync. Built and tested for the
+  iPod nano 5th generation; other libgpod-supported iPods should work too.
 
 
-  Before the first sync, the nano 5th generation must have been synced once with
-  iTunes (or Apple Devices or Finder). That is how the iPod's database signature
-  is learned. The app tells you if this step is still needed.
+  Your music is found in the Downloads folder: add songs anywhere inside it and choose Rescan
+  library. The app only changes that folder when you remove duplicates (files go to a hidden
+  .ipod-trash folder inside it).
+
+
+  Before the first sync, the nano 5th generation must have been synced once with iTunes (or
+  Apple Devices or Finder) so the iPod's database signature is learned.
 developer: PatriotCrypto
 website: https://github.com/PatriotCrypto/umbrel-ipod-sync
 dependencies: []
@@ -35,7 +41,7 @@ port: 8741
 gallery: []
 path: ""
 releaseNotes: >-
-  You can now play music right in the app. Press the play button on any album tile,
-  or open an album and play single songs, with a player bar, seeking and volume.
-  Works for the library and for what is already on the iPod.
+  iPod Sync is now uPod: a full music player with a retro visualizer (many visualizations,
+  full screen, auto-change), a playlist, skins, automatic genres, a Songs list, and a one-button
+  duplicate finder with a restorable trash. Copying music to an iPod still works as before.
 icon: https://raw.githubusercontent.com/PatriotCrypto/umbrel-ipod-sync/main/patriot-ipod-sync/icon.svg
