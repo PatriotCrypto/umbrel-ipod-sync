@@ -5,7 +5,7 @@ import time
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 
-from . import config, ipod, library, sync
+from . import audio, config, ipod, library, sync
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static")
 MAX_IDS = 20000
@@ -138,6 +138,36 @@ def create_app(start_scan=True):
             raise ValueError("invalid album id")
         keys = {t["key"] for t in ipod.current_tracks()} if ipod.is_mounted() else set()
         return jsonify(tracks=library.album_tracks(key, keys))
+
+    @app.get("/api/library/tracks/<int:track_id>/audio")
+    def library_audio(track_id):
+        row = library.track_by_id(track_id)
+        if not row:
+            return ("", 404)
+        src = library.absolute_path(row["relpath"])
+        if not os.path.isfile(src):
+            return ("", 404)
+        try:
+            path = audio.preview_file(src, row["id"], row["mtime"],
+                                      os.path.join(config.DATA_DIR, "preview"), row["codec"])
+        except RuntimeError as exc:
+            return jsonify(error=f"This song could not be prepared for playing: {exc}"), 500
+        return send_file(path, conditional=True, max_age=3600)
+
+    @app.get("/api/ipod/tracks/<int:track_id>/audio")
+    def ipod_audio(track_id):
+        if not ipod.is_mounted():
+            return ("", 404)
+        track = next((t for t in ipod.current_tracks() if t["id"] == track_id), None)
+        if not track or not track["path"]:
+            return ("", 404)
+        root = os.path.realpath(ipod.mount_path())
+        path = os.path.realpath(os.path.join(root, track["path"].lstrip(":").replace(":", "/")))
+        if os.path.commonpath([root, path]) != root or not os.path.isfile(path):
+            return ("", 404)
+        if os.path.splitext(path)[1].lower() not in (".mp3", ".m4a", ".m4p", ".wav"):
+            return jsonify(error="This song's format can't be played in the browser."), 415
+        return send_file(path, conditional=True, max_age=3600)
 
     @app.get("/api/library/cover/<key>")
     def cover(key):

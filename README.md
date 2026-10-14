@@ -67,7 +67,8 @@ change or delete your files.
 1. Plug the iPod into the Umbrel and open the app. The panel on the right shows the iPod once it is opened.
 2. Tick albums (or click one to pick songs). The panel shows what will be copied and whether it fits.
    Press `/` to jump to the search box.
-3. **Sync now.** Wait for "Sync finished", then **Eject** and unplug.
+3. Press the play button on an album (or a song inside an album) to listen in the browser before or after syncing.
+4. **Sync now.** Wait for "Sync finished", then **Eject** and unplug.
 
 ## Safety
 

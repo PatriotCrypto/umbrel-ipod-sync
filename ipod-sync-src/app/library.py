@@ -302,6 +302,15 @@ def album_tracks(key, ipod_keys=None):
         conn.close()
 
 
+def track_by_id(track_id):
+    conn = connect()
+    try:
+        row = conn.execute("SELECT * FROM tracks WHERE id = ?", (int(track_id),)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
 def tracks_by_ids(ids):
     if not ids:
         return []

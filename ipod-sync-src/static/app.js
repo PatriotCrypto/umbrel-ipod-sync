@@ -561,7 +561,8 @@
       h('div', { class: 'meta' },
         h('div', { class: 't', title: album.album }, album.album),
         h('div', { class: 's' }, [album.artist, album.year].filter(Boolean).join(' · ')),
-        h('div', { class: 'x' }, `${plural(album.tracks, 'song')} · ${formatBytes(album.size)}`))));
+        h('div', { class: 'x' }, `${plural(album.tracks, 'song')} · ${formatBytes(album.size)}`))),
+      playFab('library', album));
   }
 
   function ipodTile(album) {
@@ -581,7 +582,8 @@
       h('div', { class: 'meta' },
         h('div', { class: 't', title: album.album }, album.album),
         h('div', { class: 's' }, [album.artist, album.year].filter(Boolean).join(' · ')),
-        h('div', { class: 'x' }, `${plural(album.tracks.length, 'song')} · ${formatBytes(album.size)}`))));
+        h('div', { class: 'x' }, `${plural(album.tracks.length, 'song')} · ${formatBytes(album.size)}`))),
+      playFab('ipod', album));
   }
 
   // Tiles under artist headings (or one flat grid when the sort order is not by artist).
@@ -725,6 +727,12 @@
       }, mark === 'all' ? 'Keep this album' : 'Remove album from iPod');
     }
 
+    const playNum = (k, t) => h('button', {
+      class: 'pnum' + (isCurrent(k, t.id) ? ' now' : ''), type: 'button', title: `Play ${t.title}`,
+      'aria-label': `Play ${t.title}`,
+      onclick: (e) => { e.preventDefault(); e.stopPropagation(); queueFromSheet(t.id); },
+    }, h('span', { class: 'n' }, t.track || ''), icon('play'));
+
     const rows = tracks.map((t) => {
       if (kind === 'library') {
         const albumSelected = state.selAlbums.has(album.id);
@@ -734,7 +742,7 @@
             checked: t.on_ipod || albumSelected || state.selTracks.has(t.id),
             onchange: (e) => toggleTrack(album, t, e.target.checked),
           }),
-          h('span', { class: 'num' }, t.track || ''),
+          playNum(kind, t),
           h('span', { class: 'name', title: t.title }, t.title),
           t.on_ipod ? h('span', { class: 'tag' }, 'On iPod') : h('span', {}),
           h('span', { class: 'time' }, formatTime(t.duration_ms)));
@@ -745,12 +753,14 @@
           'aria-label': `Remove ${t.title}`,
           onchange: (e) => toggleIpodTrack(t, e.target.checked),
         }),
-        h('span', { class: 'num' }, t.track || ''),
+        playNum(kind, t),
         h('span', { class: 'name', title: t.title }, t.title),
         h('span', { class: 'time' }, formatBytes(t.size)),
         h('span', { class: 'time' }, formatTime(t.duration_ms)));
     });
 
+    const oldList = body.querySelector('.sheet-tracks');
+    const keepScroll = oldList ? oldList.scrollTop : 0;
     body.replaceChildren(
       h('div', { class: 'sheet-top' },
         h('div', { class: 'sheet-art' }, art(album.album, kind === 'library' ? album.id : album.cover, album.id)),
@@ -760,10 +770,199 @@
           h('div', { class: 'facts' }, [album.year, plural(count, 'song'), formatBytes(size), formatLength(duration)]
             .filter(Boolean).join(' · ')),
           status ? h('div', { class: 'facts' }, status) : null,
-          h('div', { class: 'plan-buttons' }, action)),
+          h('div', { class: 'plan-buttons' },
+            h('button', { class: 'btn', type: 'button', onclick: () => queueFromSheet() }, '▶ Play album'),
+            action)),
         h('button', { class: 'btn small sheet-close', type: 'button', onclick: closeSheet }, 'Close')),
-      h('div', { class: 'sheet-tracks' }, rows));
+      h('div', { class: 'sheet-tracks' }, rows),
+      current() ? h('div', { class: 'sheet-player' },
+        h('div', { class: 'pl-title' }, `Now playing: ${current().title}`), transport()) : h('span'));
+    const list = body.querySelector('.sheet-tracks');
+    if (list) list.scrollTop = keepScroll;
+    syncPlayState(); syncProgress();
   }
+
+
+  // ---------- player ----------
+  const audioEl = new Audio();
+  audioEl.preload = 'metadata';
+  audioEl.volume = Math.min(1, Math.max(0, Number(prefs.get('volume', 1))));
+  const player = { queue: [], index: -1, dragging: false };
+  const ICONS = {
+    play: 'M8 5v14l11-7z', pause: 'M6 5h4v14H6zM14 5h4v14h-4z',
+    prev: 'M6 6h2v12H6zM9.5 12 18 6v12z', next: 'M16 6h2v12h-2zM6 18V6l8.5 6z',
+    close: 'M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z',
+  };
+  function icon(name) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', ICONS[name]);
+    svg.append(path);
+    return svg;
+  }
+  const current = () => player.queue[player.index] || null;
+  const isCurrent = (kind, id) => { const t = current(); return Boolean(t) && t.kind === kind && t.id === id; };
+  const audioUrl = (t) => (t.kind === 'ipod' ? `/api/ipod/tracks/${t.id}/audio` : `/api/library/tracks/${t.id}/audio`);
+
+  function playQueue(items, index) {
+    if (!items.length) return;
+    player.queue = items;
+    playIndex(index || 0);
+  }
+
+  function playIndex(i) {
+    if (i < 0 || i >= player.queue.length) { stopPlayer(); return; }
+    player.index = i;
+    const t = current();
+    audioEl.src = audioUrl(t);
+    audioEl.play().catch((err) => {
+      if (err && err.name !== 'AbortError') toast('This song could not be played.');
+    });
+    renderPlayer();
+    updateMediaSession(t);
+    renderSheet();
+  }
+
+  function stopPlayer() {
+    audioEl.pause();
+    audioEl.removeAttribute('src');
+    audioEl.load();
+    player.queue = []; player.index = -1;
+    renderPlayer();
+    if ('mediaSession' in navigator) navigator.mediaSession.metadata = null;
+    renderSheet();
+  }
+
+  const nextTrack = () => { if (player.index < player.queue.length - 1) playIndex(player.index + 1); else stopPlayer(); };
+  function prevTrack() {
+    if (audioEl.currentTime > 3 || player.index === 0) { audioEl.currentTime = 0; return; }
+    playIndex(player.index - 1);
+  }
+  function togglePlay() {
+    if (!current()) return;
+    if (audioEl.paused) audioEl.play().catch(() => {}); else audioEl.pause();
+  }
+
+  function updateMediaSession(t) {
+    if (!('mediaSession' in navigator) || typeof MediaMetadata === 'undefined') return;
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: t.title, artist: t.artist, album: t.album,
+      artwork: t.cover ? [{ src: new URL(`/api/library/cover/${t.cover}`, location.href).href, sizes: '300x300', type: 'image/jpeg' }] : [],
+    });
+    const actions = { play: togglePlay, pause: togglePlay, previoustrack: prevTrack, nexttrack: nextTrack };
+    for (const [name, fn] of Object.entries(actions)) {
+      try { navigator.mediaSession.setActionHandler(name, fn); } catch (_) { /* unsupported */ }
+    }
+  }
+
+  // One set of transport controls; the bar and the album sheet each get a copy.
+  function transport() {
+    return h('div', { class: 'transport' },
+      h('button', { class: 'pl-btn', type: 'button', 'aria-label': 'Previous song', onclick: prevTrack }, icon('prev')),
+      h('button', { class: 'pl-btn pl-play', type: 'button', 'aria-label': 'Play or pause', onclick: togglePlay }, icon('play')),
+      h('button', { class: 'pl-btn', type: 'button', 'aria-label': 'Next song', onclick: nextTrack }, icon('next')),
+      h('span', { class: 'pl-cur' }, '0:00'),
+      h('input', {
+        class: 'pl-seek', type: 'range', min: 0, max: 1000, step: 1, value: 0, 'aria-label': 'Position',
+        oninput: (e) => { player.dragging = true; showTimes(Number(e.target.value) / 1000 * trackSeconds()); },
+        onchange: (e) => {
+          const secs = trackSeconds();
+          if (secs) audioEl.currentTime = Number(e.target.value) / 1000 * secs;
+          player.dragging = false; syncProgress();
+        },
+      }),
+      h('span', { class: 'pl-dur' }, '0:00'));
+  }
+
+  function trackSeconds() {
+    const t = current();
+    if (Number.isFinite(audioEl.duration) && audioEl.duration > 0) return audioEl.duration;
+    return t ? (t.duration_ms || 0) / 1000 : 0;
+  }
+  function showTimes(pos) {
+    document.querySelectorAll('.pl-cur').forEach((el) => { el.textContent = formatTime(pos * 1000); });
+    document.querySelectorAll('.pl-dur').forEach((el) => { el.textContent = formatTime(trackSeconds() * 1000); });
+  }
+  function syncProgress() {
+    if (!current()) return;
+    const secs = trackSeconds(), pos = audioEl.currentTime || 0;
+    if (!player.dragging) {
+      document.querySelectorAll('.pl-seek').forEach((el) => { el.value = secs ? Math.round(pos / secs * 1000) : 0; });
+      showTimes(pos);
+    }
+  }
+  function syncPlayState() {
+    const playing = Boolean(current()) && !audioEl.paused;
+    document.querySelectorAll('.pl-play').forEach((b) => {
+      b.replaceChildren(icon(playing ? 'pause' : 'play'));
+      b.classList.toggle('on', playing);
+      b.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+    });
+    document.body.classList.toggle('is-playing', playing);
+  }
+
+  function renderPlayer() {
+    const bar = $('#player');
+    const t = current();
+    document.body.classList.toggle('has-player', Boolean(t));
+    bar.hidden = !t;
+    if (!t) { bar.replaceChildren(); syncPlayState(); return; }
+    const volume = h('input', {
+      class: 'pl-vol', type: 'range', min: 0, max: 100, step: 1, value: Math.round(audioEl.volume * 100),
+      'aria-label': 'Volume',
+      oninput: (e) => { audioEl.volume = Number(e.target.value) / 100; prefs.set('volume', audioEl.volume); },
+    });
+    bar.replaceChildren(
+      h('div', { class: 'pl-art' }, art(t.album, t.cover, t.cover || t.album)),
+      h('div', { class: 'pl-info' },
+        h('div', { class: 'pl-title', title: t.title }, t.title),
+        h('div', { class: 'pl-sub' }, [t.artist, t.album].filter(Boolean).join(' · ')),
+        h('div', { class: 'pl-count' }, `${player.index + 1} of ${player.queue.length}`)),
+      transport(),
+      h('label', { class: 'pl-volume' }, 'Volume', volume),
+      h('button', { class: 'btn small', type: 'button', onclick: stopPlayer, 'aria-label': 'Close the player' }, icon('close')));
+    syncPlayState(); syncProgress();
+  }
+
+  function queueItem(kind, album, t) {
+    return {
+      kind, id: t.id, title: t.title, artist: t.artist || album.artist, album: album.album,
+      cover: kind === 'library' ? album.id : (t.album_key || album.cover || ''), duration_ms: t.duration_ms || 0,
+    };
+  }
+  function queueFromSheet(startId) {
+    const { kind, album, tracks } = state.sheet;
+    const items = tracks.map((t) => queueItem(kind, album, t));
+    const at = startId === undefined ? 0 : Math.max(0, items.findIndex((i) => i.id === startId));
+    playQueue(items, at);
+  }
+  async function playAlbum(kind, album) {
+    try {
+      let tracks;
+      if (kind === 'library') tracks = (await api(`/api/library/albums/${album.id}/tracks`)).tracks;
+      else tracks = album.tracks;
+      playQueue(tracks.map((t) => queueItem(kind, album, t)), 0);
+    } catch (err) { toast(err.message); }
+  }
+  function playFab(kind, album) {
+    return h('button', {
+      class: 'play-fab', type: 'button', title: `Play ${album.album}`, 'aria-label': `Play ${album.album}`,
+      onclick: (e) => { e.stopPropagation(); playAlbum(kind, album); },
+    }, icon('play'));
+  }
+
+  audioEl.addEventListener('play', syncPlayState);
+  audioEl.addEventListener('pause', syncPlayState);
+  audioEl.addEventListener('timeupdate', syncProgress);
+  audioEl.addEventListener('loadedmetadata', syncProgress);
+  audioEl.addEventListener('ended', nextTrack);
+  audioEl.addEventListener('error', () => {
+    if (!current() || !audioEl.getAttribute('src')) return;
+    toast(`Can't play "${current().title}".`);
+    if (player.index < player.queue.length - 1) playIndex(player.index + 1); else stopPlayer();
+  });
 
   // ---------- rendering: the iPod panel ----------
   function capacityBar() {
@@ -1030,6 +1229,7 @@
     document.addEventListener('keydown', (e) => {
       const typing = e.target.matches &&
         e.target.matches('textarea, select, input:not([type=range]):not([type=checkbox]):not([type=radio])');
+      if (e.key === ' ' && e.target === document.body && current()) { e.preventDefault(); togglePlay(); return; }
       if (e.key === '/' && !typing && !e.metaKey && !e.ctrlKey) { e.preventDefault(); $('#q').focus(); }
     });
 

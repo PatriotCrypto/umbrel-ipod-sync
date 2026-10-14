@@ -35,10 +35,6 @@ port: 8741
 gallery: []
 path: ""
 releaseNotes: >-
-  A new look: album tiles grouped by artist, sorting and A-Z jump, songs already on
-  the iPod kept apart from songs still to add, a Surprise me picker, and a page for
-  each album where you can choose single songs.
-submitter: PatriotCrypto
-permissions:
-  - STORAGE_DOWNLOADS
-icon: https://raw.githubusercontent.com/PatriotCrypto/umbrel-ipod-sync/main/patriot-ipod-sync/icon.svg
+  You can now play music right in the app. Press the play button on any album tile,
+  or open an album and play single songs, with a player bar, seeking and volume.
+  Works for the library and for what is already on the iPod.

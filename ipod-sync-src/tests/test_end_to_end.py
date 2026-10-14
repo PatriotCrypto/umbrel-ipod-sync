@@ -280,3 +280,37 @@ def test_on_ipod_split(pod, scanned):
     ids = set(all_album_ids())
     assert listing and all(t["album_key"] in ids for t in listing)
     assert {"albumartist", "year"} <= set(listing[0])
+
+
+def test_play_in_browser(pod, scanned):
+    client = create_app(start_scan=False).test_client()
+    rows = {r["title"]: r for r in (library.tracks_by_albums(all_album_ids()))}
+
+    # an mp3 streams as is and supports seeking (HTTP Range)
+    mp3 = rows["Dawn"]
+    full = client.get(f"/api/library/tracks/{mp3['id']}/audio")
+    assert full.status_code == 200 and full.mimetype == "audio/mpeg"
+    part = client.get(f"/api/library/tracks/{mp3['id']}/audio", headers={"Range": "bytes=0-99"})
+    assert part.status_code == 206 and len(part.data) == 100
+
+    # FLAC plays as is, Ogg is converted to AAC once and then reused
+    assert client.get(f"/api/library/tracks/{rows['Tab\there \\ slash']['id']}/audio").mimetype == "audio/flac"
+    ogg = rows["Ogg Song"]
+    first = client.get(f"/api/library/tracks/{ogg['id']}/audio", headers={"Range": "bytes=0-9"})
+    assert first.status_code == 206 and first.mimetype == "audio/mp4"
+    cache = os.path.join(config.DATA_DIR, "preview")
+    made = os.listdir(cache)
+    assert len(made) == 1 and made[0].endswith(".m4a")
+    client.get(f"/api/library/tracks/{ogg['id']}/audio")
+    assert os.listdir(cache) == made
+
+    assert client.get("/api/library/tracks/999999/audio").status_code == 404
+
+    # songs on the iPod play straight from the iPod's own files
+    sync.start_job([a for a in all_album_ids()], [], [])
+    wait_for_job()
+    ipod.invalidate_tracks()
+    track = ipod.current_tracks()[0]
+    played = client.get(f"/api/ipod/tracks/{track['id']}/audio")
+    assert played.status_code == 200 and len(played.data) > 1000
+    assert client.get("/api/ipod/tracks/424242/audio").status_code == 404

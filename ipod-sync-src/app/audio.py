@@ -7,6 +7,7 @@ to AAC. Copy-protected files cannot be played and are skipped.
 import os
 import re
 import subprocess
+import threading
 
 import mutagen
 from mutagen.mp4 import MP4
@@ -176,6 +177,49 @@ def convert_to_aac(src, work_dir, bitrate, samplerate):
     if result.returncode != 0 or not os.path.exists(dst):
         raise RuntimeError((result.stderr or "ffmpeg failed").strip().splitlines()[-1])
     return dst
+
+
+BROWSER_CODECS = {"mp3", "aac", "flac", "wav"}
+PREVIEW_CACHE_LIMIT = 600 * 1024 * 1024
+_preview_lock = threading.Lock()
+
+
+def preview_file(src, track_id, mtime, cache_dir, codec):
+    """File the browser can play for src: the original, or a cached AAC copy."""
+    if codec in BROWSER_CODECS:
+        return src
+    os.makedirs(cache_dir, exist_ok=True)
+    dst = os.path.join(cache_dir, f"{int(track_id)}-{int(mtime)}.m4a")
+    with _preview_lock:
+        if not os.path.exists(dst):
+            tmp = dst + ".part.m4a"
+            cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                   "-i", src, "-vn", "-map_metadata", "-1", "-c:a", "aac", "-b:a", "192k",
+                   "-ac", "2", "-movflags", "+faststart", tmp]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+            if result.returncode != 0 or not os.path.exists(tmp):
+                raise RuntimeError((result.stderr or "ffmpeg failed").strip().splitlines()[-1])
+            os.replace(tmp, dst)
+            _trim_cache(cache_dir, keep=dst)
+    return dst
+
+
+def _trim_cache(cache_dir, keep):
+    files = []
+    for name in os.listdir(cache_dir):
+        path = os.path.join(cache_dir, name)
+        if path != keep and name.endswith(".m4a") and not name.endswith(".part.m4a"):
+            st = os.stat(path)
+            files.append((st.st_atime, st.st_size, path))
+    total = sum(f[1] for f in files) + os.path.getsize(keep)
+    for _, size, path in sorted(files):
+        if total <= PREVIEW_CACHE_LIMIT:
+            break
+        try:
+            os.remove(path)
+            total -= size
+        except OSError:
+            pass
 
 
 def codec_for_output(action, meta):
