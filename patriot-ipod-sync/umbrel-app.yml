@@ -38,3 +38,4 @@ releaseNotes: >-
   You can now play music right in the app. Press the play button on any album tile,
   or open an album and play single songs, with a player bar, seeking and volume.
   Works for the library and for what is already on the iPod.
+icon: https://raw.githubusercontent.com/PatriotCrypto/umbrel-ipod-sync/main/patriot-ipod-sync/icon.svg
