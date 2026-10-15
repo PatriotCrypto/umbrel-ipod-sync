@@ -2,7 +2,7 @@ manifestVersion: 1
 id: patriot-mixtape-maker
 category: media
 name: Mixtape Maker
-version: "0.2.0"
+version: "0.2.1"
 tagline: Make a cassette mixtape and send it as a digital cassette that opens like a real one
 description: >-
   Mixtape Maker brings the 90s mixtape ritual to your Umbrel.
@@ -29,7 +29,7 @@ port: 3917
 gallery: []
 path: ""
 releaseNotes: >-
-  Send your mixtape as a digital cassette: one file that opens like a case and shows the cassette and track list. Email it from the app, or download the file, the picture or a ZIP with the music.
+  The shared cassette now opens on phones, including inside Mail and Gmail previews. Email can also attach the songs.
 submitter: PatriotCrypto
 submission: https://github.com/PatriotCrypto/umbrel-mixtape-maker
 dependencies: []

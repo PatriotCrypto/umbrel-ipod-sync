@@ -7,7 +7,7 @@ services:
       APP_PORT: 3000
 
   web:
-    image: ghcr.io/patriotcrypto/mixtape-maker:0.2.0@sha256:4b8971ceadd0ddc0272e9128934887224e4d9a6ad16b3f6ea51c5d1c9b903f14
+    image: ghcr.io/patriotcrypto/mixtape-maker:0.2.1@sha256:e1828a51ab5579ea2368161f4af016e39d49d88c1da35610b779444fcffa030c
     user: "1000:1000"
     restart: on-failure
     stop_grace_period: 1m
