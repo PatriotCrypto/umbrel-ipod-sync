@@ -135,8 +135,16 @@
     return { title: `iPod ${name}`, generation: `${n}${suffix} generation` };
   }
 
+  // The page scrolls inside the content pane, not the window.
+  const scroller = () => document.querySelector('.stage');
+  function nearEnd(el, margin = 600) {
+    const pane = scroller();
+    if (!el || !pane) return false;
+    return el.getBoundingClientRect().top < pane.getBoundingClientRect().bottom + margin;
+  }
+
   window.IP = {
-    $, h, formatBytes, formatTime, formatLength, plural, capitalize, norm, hueOf, prefs, api, toast,
+    scroller, nearEnd, $, h, formatBytes, formatTime, formatLength, plural, capitalize, norm, hueOf, prefs, api, toast,
     icon, art, deviceName,
   };
 })();

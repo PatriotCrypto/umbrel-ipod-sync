@@ -7,7 +7,7 @@ Built for the **iPod nano 5th generation** (the one with the camera). It uses
 [libgpod](https://sourceforge.net/projects/gtkpod/), the same library that Rhythmbox and gtkpod use to
 write an iPod's music database.
 
-- Browse the music in your Umbrel's Downloads folder as album tiles, grouped under artist headings.
+- Browse your music as album tiles, grouped under artist headings.
   Search, sort (artist, album, newest year, recently added, biggest), jump by letter, and resize the tiles.
 - Albums that are already on the iPod are kept apart: the Library tab defaults to **To add**, and the
   **On iPod** tab shows what is on the device. Partly copied albums are flagged.
@@ -61,8 +61,11 @@ You need a free GitHub account. The Umbrel pulls a ready-made image, which GitHu
    **uPod** from "Patriot Apps".
 6. The store listing already points at the icon in this repository.
 
-Put music anywhere inside your Umbrel's **Downloads** folder; it is mounted read-write only so duplicates can be moved to
-`.ipod-trash` inside it. Nothing else is ever changed, and nothing is erased until you empty the trash.
+uPod reads music from the **Downloads** folder until you choose otherwise: in Settings, "Music folders" lets you pick any
+folders inside your Umbrel storage. The whole storage folder is mounted so that choice is possible; uPod only ever
+changes files when you remove duplicates, which moves them to a hidden `.ipod-trash` folder inside the music folder they
+came from. Nothing is erased until you empty the trash. Playlists are kept by file path, so they survive rescans and
+reorganising the index.
 
 ## Using it
 

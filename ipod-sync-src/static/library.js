@@ -193,11 +193,25 @@
   // ---------- status polling ----------
   let lastRevision = null;
   let lastScanError = '';
+  let seenGeneration = -1, scanPoll = null;
   async function refreshStatus() {
     try {
       state.status = await api('/api/status');
     } catch (err) {
       return;
+    }
+    const lib = state.status.library;
+    if (lib && lib.generation !== undefined && lib.generation !== seenGeneration) {
+      const first = seenGeneration === -1;
+      seenGeneration = lib.generation;
+      if (!first) {            // songs were added, removed or re-sorted: refresh whatever is showing
+        loadGenres();
+        if (state.tab === 'library') loadAlbums(true);
+        window.dispatchEvent(new CustomEvent('ipod:library-changed'));
+      }
+    }
+    if (lib && lib.scan && lib.scan.running && !scanPoll) {   // follow a scan closely
+      scanPoll = setTimeout(() => { scanPoll = null; refreshStatus(); }, 1500);
     }
     const pod = ipodState();
     applyDeviceColor(pod.device && pod.device.color);
@@ -293,6 +307,14 @@
     }
     remember(all);
     return all;
+  }
+
+  // Pick loose songs (a playlist, say) to copy to the iPod, then show the iPod panel.
+  function selectTracks(ids) {
+    ids.forEach((id) => state.selTracks.add(id));
+    window.IP.nav.go('ipod');
+    schedulePlan(); renderList(); renderPod();
+    if (!device()) toast('Plug in your iPod to copy these songs.');
   }
 
   async function selectAll() {
@@ -572,10 +594,10 @@
             'Nothing left to add. Switch to “All” to browse your whole library, or open the “On iPod” tab.'));
         } else if (lib && !lib.music_dir_exists) {
           list.append(h('div', { class: 'empty' }, h('strong', {}, 'The music folder is not available'),
-            'Check that this app has access to your Umbrel’s Downloads folder.'));
+            'Check that your music folders still exist (Settings → Music folders).'));
         } else if (lib) {
           list.append(h('div', { class: 'empty' }, h('strong', {}, 'No music found yet'),
-            'Add songs anywhere in your Umbrel’s Downloads folder, then choose Rescan library.'));
+            'Add songs to your music folder, or choose other folders in Settings → Music folders, then press Rescan library.'));
         }
       }
       renderTiles(list, state.albums, libraryTile, state.sort === 'artist', (group) => {
@@ -610,7 +632,7 @@
 
   function maybeLoadMore() {
     if (state.tab !== 'library' || state.loadingAlbums || state.albums.length >= state.albumTotal) return;
-    if ($('#more').getBoundingClientRect().top < window.innerHeight + 600) loadAlbums(false);
+    if (document.body.dataset.view === 'library' && window.IP.nearEnd($('#more'), 600)) loadAlbums(false);
   }
 
   // ---------- rendering: album sheet ----------
@@ -709,6 +731,9 @@
           h('div', { class: 'plan-buttons' },
             h('button', { class: 'btn', type: 'button', onclick: () => queueFromSheet() }, '▶ Play album'),
             h('button', { class: 'btn', type: 'button', onclick: () => P.enqueue(sheetItems()) }, 'Add to queue'),
+            kind === 'library' ? h('button', { class: 'btn', type: 'button', 'aria-haspopup': 'menu',
+              onclick: (e) => window.IP.playlists.menu(e.currentTarget, { ids: () => state.sheet.tracks.map((t) => t.id), label: album.album }) },
+              'Add to playlist') : null,
             action)),
         h('button', { class: 'btn small sheet-close', type: 'button', onclick: closeSheet }, 'Close')),
       h('div', { class: 'sheet-tracks' }, rows),
@@ -900,6 +925,7 @@
       $('#set-lossless').checked = state.settings.convert_lossless;
       $('#set-artwork').checked = state.settings.artwork;
       $('#set-force').checked = state.settings.hfs_force_rw;
+      window.IP.folders.render(state.settings);
       await renderBackups();
       $('#settings').showModal();
     } catch (err) { toast(err.message); }
@@ -998,7 +1024,7 @@
     sheet.addEventListener('click', (e) => { if (e.target === sheet) closeSheet(); });
     P.onChange(() => renderSheet());
 
-    window.addEventListener('scroll', maybeLoadMore, { passive: true });
+    window.IP.scroller().addEventListener('scroll', maybeLoadMore, { passive: true });
     document.addEventListener('keydown', (e) => {
       const typing = e.target.matches &&
         e.target.matches('textarea, select, input:not([type=range]):not([type=checkbox]):not([type=radio])');
@@ -1013,22 +1039,10 @@
     loadGenres();
     refreshStatus();
     setInterval(() => { if (!state.job) refreshStatus(); }, 4000);
-    // While the library is scanned, show new albums as they appear.
-    setInterval(() => {
-      const scan = state.status && state.status.library && state.status.library.scan;
-      if (scan && scan.running && state.tab === 'library') loadAlbums(true);
-    }, 5000);
-    let wasScanning = false;
-    setInterval(() => {
-      const scan = state.status && state.status.library && state.status.library.scan;
-      const now = Boolean(scan && scan.running);
-      if (wasScanning && !now) { loadGenres(); window.dispatchEvent(new CustomEvent('ipod:library-changed')); }
-      wasScanning = now;
-    }, 1500);
   }
 
   window.IP.lib = {
-    init, showTab, setGenre, openSettings, refreshStatus, reloadList, loadGenres,
+    init, showTab, setGenre, openSettings, selectTracks, generation: () => ((state.status && state.status.library) || {}).generation || 0, refreshStatus, reloadList, loadGenres,
     tab: () => state.tab, libraryChanged: () => { loadGenres(); if (state.tab === 'library') loadAlbums(true); refreshStatus(); },
   };
 })();

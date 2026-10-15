@@ -104,3 +104,4 @@ def canonical(raw):
             return name
     tidy = re.sub(r"\s+", " ", cleaned).strip()
     return (tidy.title() if tidy.islower() or tidy.isupper() else tidy)[:32]
+RULES_VERSION = "1"

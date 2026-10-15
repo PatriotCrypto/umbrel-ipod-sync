@@ -189,14 +189,21 @@ def preview_file(src, track_id, mtime, cache_dir, codec):
     if codec in BROWSER_CODECS:
         return src
     os.makedirs(cache_dir, exist_ok=True)
-    dst = os.path.join(cache_dir, f"{int(track_id)}-{int(mtime)}.m4a")
+    dst = os.path.join(cache_dir, f"{int(track_id)}-{int(mtime)}-{os.path.getsize(src)}.m4a")
     with _preview_lock:
         if not os.path.exists(dst):
             tmp = dst + ".part.m4a"
             cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
                    "-i", src, "-vn", "-map_metadata", "-1", "-c:a", "aac", "-b:a", "192k",
                    "-ac", "2", "-movflags", "+faststart", tmp]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                raise RuntimeError("converting this song took too long")
             if result.returncode != 0 or not os.path.exists(tmp):
                 raise RuntimeError((result.stderr or "ffmpeg failed").strip().splitlines()[-1])
             os.replace(tmp, dst)

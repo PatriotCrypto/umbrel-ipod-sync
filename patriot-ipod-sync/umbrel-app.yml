@@ -10,24 +10,24 @@ description: >-
 
 
   Play your library in the browser with full-screen visualizations in the style of the
-  early-2000s media players, a playlist, and skins. Your music is sorted by genre
+  early-2000s media players, your own playlists, and skins. Your music is sorted by genre
   automatically, even when the tags are messy.
 
 
-  One button finds songs that appear more than once (same title and artist, for example
-  songs repeated across albums) and lets you move the extra copies to a trash folder.
-  One copy of every song always stays, and the trash can be restored or emptied.
+  In Settings you choose which folders on your Umbrel uPod reads music from. By default
+  it uses your Downloads folder.
 
 
-  Copying to an iPod works as before: pick albums or single songs, see the space they will
-  use, and sync. Songs the iPod cannot play (FLAC, Ogg, Opus) are converted to AAC, covers are
-  copied, and the iPod's database is backed up before every sync. Built and tested for the
-  iPod nano 5th generation; other libgpod-supported iPods should work too.
+  One button finds songs that appear more than once (same title and artist, and about the
+  same length) and lets you move the extra copies to a trash folder. One copy of every song
+  always stays, and the trash can be restored or emptied. This is the only time uPod changes
+  your files.
 
 
-  Your music is found in the Downloads folder: add songs anywhere inside it and choose Rescan
-  library. The app only changes that folder when you remove duplicates (files go to a hidden
-  .ipod-trash folder inside it).
+  Copying to an iPod works as before: pick albums, songs or a playlist, see the space they
+  will use, and sync. Songs the iPod cannot play (FLAC, Ogg, Opus) are converted to AAC,
+  covers are copied, and the iPod's database is backed up before every sync. Built and
+  tested for the iPod nano 5th generation; other libgpod-supported iPods should work too.
 
 
   Before the first sync, the nano 5th generation must have been synced once with iTunes (or
@@ -41,7 +41,7 @@ port: 8741
 gallery: []
 path: ""
 releaseNotes: >-
-  iPod Sync is now uPod: a full music player with a retro visualizer (many visualizations,
-  full screen, auto-change), a playlist, skins, automatic genres, a Songs list, and a one-button
-  duplicate finder with a restorable trash. Copying music to an iPod still works as before.
+  New: playlists you can make in the app, a Settings option to choose which folders uPod
+  reads music from, and much faster Songs, Library and Genres pages on big collections.
+  Plus a small surprise for anyone who loves old-school music players.
 icon: https://raw.githubusercontent.com/PatriotCrypto/umbrel-ipod-sync/main/patriot-ipod-sync/icon.svg

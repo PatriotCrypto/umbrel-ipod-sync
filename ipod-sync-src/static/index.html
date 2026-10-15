@@ -11,7 +11,7 @@
 <body data-skin="aqua" data-view="now">
   <header class="titlebar">
     <div class="brand">
-      <svg class="orb" viewBox="0 0 40 40" aria-hidden="true">
+      <svg class="orb" id="orb" viewBox="0 0 40 40" aria-hidden="true">
         <defs>
           <radialGradient id="orb-g" cx="40%" cy="30%" r="75%">
             <stop offset="0" stop-color="#d4f1ff"/>
@@ -44,6 +44,7 @@
       <button class="railbtn" data-go="now" type="button">Now Playing</button>
       <button class="railbtn" data-go="library" type="button">Library <span id="nav-lib-count" class="badge-n"></span></button>
       <button class="railbtn" data-go="songs" type="button">Songs <span id="nav-songs-count" class="badge-n"></span></button>
+      <button class="railbtn" data-go="playlists" type="button">Playlists <span id="nav-playlists-count" class="badge-n"></span></button>
       <button class="railbtn" data-go="genres" type="button">Genres</button>
       <button class="railbtn" id="nav-ipod" data-go="ipod" type="button"><span class="led" aria-hidden="true"></span>Copy to iPod <span id="nav-ipod-count" class="badge-n"></span></button>
       <button class="railbtn" data-go="dupes" type="button">Duplicates</button>
@@ -57,7 +58,7 @@
         <aside class="queue" aria-label="Playlist">
           <div class="queue-top">
             <div id="queue-head" class="queue-head"></div>
-            <div class="queue-sub"><span id="queue-count"></span><button id="queue-clear" class="btn link" type="button" hidden>Clear</button></div>
+            <div class="queue-sub"><span id="queue-count"></span><span class="queue-actions"><button id="queue-save" class="btn link" type="button">Save as playlist</button><button id="queue-clear" class="btn link" type="button" hidden>Clear</button></span></div>
           </div>
           <div id="queue-list" class="queue-list"></div>
           <div id="queue-total" class="queue-total"></div>
@@ -116,7 +117,7 @@
       <section id="view-songs" class="view songs" aria-label="Songs" hidden>
         <div class="songs-bar">
           <h2 class="view-title">Songs <span id="songs-count" class="count"></span></h2>
-          <input id="songs-q" class="search" type="search" placeholder="Search songs, artists, albums, genres" aria-label="Search songs" autocomplete="off">
+          <input id="songs-q" class="search" type="search" placeholder="Search songs, artists, albums" aria-label="Search songs" autocomplete="off">
           <label class="tool">Genre <select id="songs-genre" class="menu"><option value="">All genres</option></select></label>
           <label class="tool">Sort
             <select id="songs-sort" class="menu">
@@ -131,6 +132,17 @@
           <button id="songs-shuffle" class="btn" type="button">Shuffle</button>
         </div>
         <div id="songs-list" class="songs-list"></div>
+      </section>
+
+      <section id="view-playlists" class="view plists" aria-label="Playlists" hidden>
+        <aside class="plist-side">
+          <div class="plist-side-head">
+            <h2 class="view-title">Playlists</h2>
+            <button id="pl-new" class="btn small primary" type="button">＋ New playlist</button>
+          </div>
+          <div id="pl-list" class="plist-cards"></div>
+        </aside>
+        <div id="pl-detail" class="plist-detail"></div>
       </section>
 
       <section id="view-genres" class="view genres-view" aria-label="Genres" hidden>
@@ -163,6 +175,13 @@
   <dialog id="settings" aria-labelledby="settings-title">
     <form method="dialog" class="sheet">
       <h2 id="settings-title">Settings</h2>
+
+      <section class="field" aria-labelledby="mf-title">
+        <span id="mf-title">Music folders</span>
+        <small>uPod finds songs in these folders and everything inside them. Pick any folder on your Umbrel: Downloads, Media, an external drive.</small>
+        <ul id="music-folders" class="folder-chosen"></ul>
+        <div><button id="fp-add" class="btn small" type="button">＋ Add a folder…</button></div>
+      </section>
 
       <label class="field">
         <span>Quality of converted songs (when copying to an iPod)</span>
@@ -201,12 +220,54 @@
     </form>
   </dialog>
 
+  <dialog id="folder-picker" aria-labelledby="fp-title">
+    <form method="dialog" class="sheet" onsubmit="return false">
+      <h2 id="fp-title">Choose a music folder</h2>
+      <nav id="fp-crumbs" class="crumbs" aria-label="Folder path"></nav>
+      <ul id="fp-list" class="fp-list"></ul>
+      <p id="fp-hint" class="muted small"></p>
+      <div class="actions two">
+        <button id="fp-cancel" type="button" class="btn">Cancel</button>
+        <button id="fp-use" type="button" class="btn primary">Use this folder</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="ask" aria-labelledby="ask-title">
+    <form method="dialog" class="sheet">
+      <h2 id="ask-title"></h2>
+      <p id="ask-msg" class="muted"></p>
+      <input id="ask-input" class="search" type="text" maxlength="80" autocomplete="off" aria-label="Name">
+      <div class="actions two">
+        <button id="ask-cancel" type="button" class="btn">Cancel</button>
+        <button id="ask-ok" value="ok" class="btn primary">OK</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="liner" aria-labelledby="liner-title">
+    <div class="liner">
+      <div class="liner-disc" aria-hidden="true"></div>
+      <p class="liner-kicker">Hidden track · 12 of 12</p>
+      <h2 id="liner-title">Liner Notes</h2>
+      <p class="liner-lead">Made with love by a fellow millennial.</p>
+      <p>Remember when music was something you <em>had</em>? A burned CD with the track list in Sharpie. A Discman that skipped if you breathed on it. Sitting through dial-up for one song that turned out to be a stranger’s voice saying “gotcha.” A mixtape that ate a whole Saturday and meant everything. And that deal for twelve CDs for a penny, as long as you didn’t read the fine print.</p>
+      <p>Then came the algorithms. The apps. The subscriptions. Now nearly everything is rented, nothing is really yours, and the shuffle knows you better than you’d like.</p>
+      <p>uPod can’t give those days back. Nobody can. But it’s a step in the right direction: your music, on your own hardware, in your own house. No ads, no monthly fee, nobody deciding what you hear next. Plug in an old iPod and let it sing again.</p>
+      <p class="liner-tag">Simple music. Music you own.</p>
+      <p class="liner-ps">P.S. The white earbuds are optional.</p>
+      <button id="liner-close" class="btn primary" type="button">Back to the music</button>
+    </div>
+  </dialog>
+
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <script src="/static/core.js"></script>
   <script src="/static/viz.js"></script>
   <script src="/static/player.js"></script>
   <script src="/static/library.js"></script>
   <script src="/static/views.js"></script>
+  <script src="/static/folders.js"></script>
+  <script src="/static/playlists.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

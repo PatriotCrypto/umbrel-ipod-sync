@@ -7,7 +7,9 @@
   const toItem = (t) => P.queueItem('library', { album: t.album, artist: t.artist }, t);
 
   // =========================== Songs ===========================
-  const songs = { q: '', genre: '', sort: prefs.get('songSort', 'artist'), items: [], total: 0, seq: 0, loading: false, loaded: false };
+  const songs = { q: '', genre: '', sort: prefs.get('songSort', 'artist'), items: [], total: 0, seq: 0,
+                  loading: false, loaded: false, gen: -1, byId: new Map() };
+  const PAGE = 250;
 
   function songsParams(extra) {
     return new URLSearchParams({ q: songs.q, genre: songs.genre, sort: songs.sort, ...extra });
@@ -17,15 +19,20 @@
     if (!reset && songs.loading) return;
     const seq = reset ? ++songs.seq : songs.seq;
     songs.loading = true;
+    if (reset) renderSongs();            // show the loading skeleton straight away
+    let fresh = [];
     try {
       const offset = reset ? 0 : songs.items.length;
-      const data = await api(`/api/library/tracks?${songsParams({ limit: 250, offset })}`);
+      const data = await api(`/api/library/tracks?${songsParams({ limit: PAGE, offset })}`);
       if (seq !== songs.seq) return;
-      songs.items = reset ? data.tracks : songs.items.concat(data.tracks);
-      songs.total = data.total; songs.loaded = true;
+      fresh = data.tracks;
+      songs.items = reset ? fresh : songs.items.concat(fresh);
+      fresh.forEach((t) => songs.byId.set(t.id, t));
+      songs.total = data.total; songs.loaded = true; songs.gen = window.IP.lib.generation();
     } catch (err) { if (seq === songs.seq) toast(err.message); }
     finally { if (seq === songs.seq) songs.loading = false; }
-    if (seq === songs.seq) renderSongs();
+    if (seq !== songs.seq) return;
+    if (reset) renderSongs(); else appendSongs(fresh);
   }
 
   async function playSongs(startId, shuffle) {
@@ -46,35 +53,74 @@
     } catch (err) { toast(err.message); }
   }
 
+  function songRow(t) {
+    return h('div', { class: 'songrow' + (P.isCurrent('library', t.id) ? ' now' : ''), role: 'row', 'data-id': t.id },
+      h('button', { class: 'rowplay', type: 'button', 'data-act': 'play', title: `Play ${t.title}`, 'aria-label': `Play ${t.title}` }, icon('play')),
+      h('span', { class: 'c-title', title: t.title }, t.title),
+      h('span', { class: 'c-artist', title: t.artist }, t.artist),
+      h('span', { class: 'c-album', title: t.album }, t.album),
+      h('button', { class: 'chip', type: 'button', 'data-act': 'genre', title: `Only ${t.genre}` }, t.genre),
+      h('span', { class: 'r' }, formatTime(t.duration_ms)),
+      h('button', { class: 'rowadd', type: 'button', 'data-act': 'menu', title: 'Add to queue or a playlist', 'aria-label': `Add ${t.title} to the queue or a playlist`, 'aria-haspopup': 'menu' }, icon('plus')));
+  }
+
+  function songsClick(e) {
+    const row = e.target.closest('.songrow[data-id]');
+    if (!row) return;
+    const t = songs.byId.get(Number(row.dataset.id));
+    const act = e.target.closest('[data-act]');
+    if (!t || !act) return;
+    if (act.dataset.act === 'play') playSongs(t.id, false);
+    else if (act.dataset.act === 'genre') { songs.genre = t.genre; syncSongControls(); loadSongs(true); }
+    else if (act.dataset.act === 'menu') window.IP.playlists.menu(act, { ids: [t.id], items: () => [toItem(t)], label: t.title });
+  }
+
+  function moreButton() {
+    return h('div', { class: 'more' }, h('button', { class: 'btn', type: 'button', onclick: () => loadSongs(false) },
+      `Show more (${songs.total - songs.items.length} left)`));
+  }
+
   function renderSongs() {
     const box = $('#songs-list');
-    const head = $('#songs-count');
-    head.textContent = songs.loaded ? plural(songs.total, 'song') : '';
+    $('#songs-count').textContent = songs.loaded ? plural(songs.total, 'song') : '';
     box.replaceChildren();
+    if (songs.loading && !songs.items.length) {
+      box.append(h('div', { class: 'songtable skeleton', 'aria-busy': 'true', 'aria-label': 'Loading songs' },
+        Array.from({ length: 12 }, () => h('div', { class: 'songrow' }, h('span', {}), h('span', { class: 'bar-s' }), h('span', { class: 'bar-s' }), h('span', { class: 'bar-s' })))));
+      return;
+    }
     if (songs.loaded && !songs.items.length) {
       box.append(h('div', { class: 'empty' }, h('strong', {}, songs.q || songs.genre ? 'No matches' : 'No music found yet'),
-        songs.q || songs.genre ? 'Try a different search or genre.' : 'Add songs anywhere in your Umbrel’s Downloads folder, then choose Rescan library.'));
+        songs.q || songs.genre ? 'Try a different search or genre.' : 'Add songs to a music folder on your Umbrel, or choose other folders in Settings.'));
       return;
     }
     const table = h('div', { class: 'songtable', role: 'table' },
       h('div', { class: 'songrow headrow', role: 'row' },
         h('span', {}), h('span', {}, 'Title'), h('span', {}, 'Artist'), h('span', {}, 'Album'), h('span', {}, 'Genre'), h('span', { class: 'r' }, 'Time'), h('span', {})));
-    songs.items.forEach((t) => {
-      const playing = P.isCurrent('library', t.id);
-      table.append(h('div', { class: 'songrow' + (playing ? ' now' : ''), role: 'row', ondblclick: () => playSongs(t.id, false) },
-        h('button', { class: 'rowplay', type: 'button', title: `Play ${t.title}`, 'aria-label': `Play ${t.title}`, onclick: () => playSongs(t.id, false) }, icon('play')),
-        h('span', { class: 'c-title', title: t.title }, t.title),
-        h('span', { class: 'c-artist', title: t.artist }, t.artist),
-        h('span', { class: 'c-album', title: t.album }, t.album),
-        h('button', { class: 'chip', type: 'button', title: `Only ${t.genre}`, onclick: () => { songs.genre = t.genre; syncSongControls(); loadSongs(true); } }, t.genre),
-        h('span', { class: 'r' }, formatTime(t.duration_ms)),
-        h('button', { class: 'rowadd', type: 'button', title: 'Add to queue', 'aria-label': `Add ${t.title} to the queue`, onclick: () => P.enqueue([toItem(t)]) }, icon('plus'))));
+    table.append(...songs.items.map(songRow));
+    table.addEventListener('click', songsClick);
+    table.addEventListener('dblclick', (e) => {
+      const row = e.target.closest('.songrow[data-id]');
+      if (row && !e.target.closest('button')) playSongs(Number(row.dataset.id), false);
     });
     box.append(table);
-    if (songs.items.length < songs.total) {
-      box.append(h('div', { class: 'more' }, h('button', { class: 'btn', type: 'button', onclick: () => loadSongs(false) },
-        `Show more (${songs.total - songs.items.length} left)`)));
-    }
+    if (songs.items.length < songs.total) box.append(moreButton());
+  }
+
+  // "Show more" adds rows to the table instead of rebuilding it.
+  function appendSongs(fresh) {
+    const table = $('#songs-list .songtable');
+    if (!table) { renderSongs(); return; }
+    table.append(...fresh.map(songRow));
+    $('#songs-list .more')?.remove();
+    if (songs.items.length < songs.total) $('#songs-list').append(moreButton());
+  }
+
+  // Playing something only changes which row is highlighted.
+  function markNow() {
+    document.querySelectorAll('#songs-list .songrow[data-id]').forEach((row) => {
+      row.classList.toggle('now', P.isCurrent('library', Number(row.dataset.id)));
+    });
   }
 
   function syncSongControls() {
@@ -82,9 +128,22 @@
     $('#songs-sort').value = songs.sort;
   }
 
+  // The genre list is the same everywhere and only changes when the library does.
+  const genreCache = { gen: -1, list: null, pending: null };
+  async function genreList() {
+    const gen = window.IP.lib.generation();
+    if (genreCache.list && genreCache.gen === gen) return genreCache.list;
+    if (!genreCache.pending) {
+      genreCache.pending = api('/api/library/genres').then((r) => {
+        genreCache.list = r.genres; genreCache.gen = gen; return r.genres;
+      }).finally(() => { genreCache.pending = null; });
+    }
+    return genreCache.pending;
+  }
+
   async function fillGenreSelect(select, current) {
     try {
-      const { genres } = await api('/api/library/genres');
+      const genres = await genreList();
       select.replaceChildren(h('option', { value: '' }, 'All genres'),
         ...genres.map((g) => h('option', { value: g.name }, `${g.name} (${g.tracks})`)));
       select.value = current;
@@ -95,7 +154,7 @@
   async function renderGenres() {
     const box = $('#genres-list');
     let genres = [];
-    try { genres = (await api('/api/library/genres')).genres; } catch (err) { toast(err.message); }
+    try { genres = await genreList(); } catch (err) { toast(err.message); }
     box.replaceChildren();
     $('#genres-count').textContent = genres.length ? plural(genres.length, 'genre') : '';
     if (!genres.length) {
@@ -262,19 +321,24 @@
     $('#songs-sort').addEventListener('change', (e) => { songs.sort = e.target.value; prefs.set('songSort', songs.sort); loadSongs(true); });
     $('#songs-play').addEventListener('click', () => playSongs(undefined, false));
     $('#songs-shuffle').addEventListener('click', () => playSongs(undefined, true));
-    P.onChange(() => { if (document.body.dataset.view === 'songs') renderSongs(); });
-    window.addEventListener('scroll', () => {
+    P.onChange(() => { if (document.body.dataset.view === 'songs') markNow(); });
+    window.IP.scroller().addEventListener('scroll', () => {
       if (document.body.dataset.view !== 'songs' || songs.loading || songs.items.length >= songs.total) return;
-      const more = $('#songs-list .more');
-      if (more && more.getBoundingClientRect().top < window.innerHeight + 500) loadSongs(false);
+      if (window.IP.nearEnd($('#songs-list .more'), 500)) loadSongs(false);
     }, { passive: true });
-    window.addEventListener('ipod:library-changed', () => { songs.loaded = false; });
+    window.addEventListener('ipod:library-changed', () => {
+      songs.loaded = false;
+      if (document.body.dataset.view === 'songs') loadSongs(true);
+    });
     syncSongControls();
   }
 
   window.IP.views = {
     init,
-    showSongs() { fillGenreSelect($('#songs-genre'), songs.genre); syncSongControls(); if (!songs.loaded) loadSongs(true); else renderSongs(); },
+    showSongs() {
+      fillGenreSelect($('#songs-genre'), songs.genre); syncSongControls();
+      if (!songs.loaded || songs.gen !== window.IP.lib.generation()) loadSongs(true); else markNow();
+    },
     showGenres: renderGenres,
     showDupes() { renderDupes(); refreshTrash().then((trash) => { if (trash && trash.files && !dupes.result) { dupes.result = null; } }); },
     setSongsGenre(name) { songs.genre = name || ''; },

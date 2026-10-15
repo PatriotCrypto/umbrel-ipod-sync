@@ -5,7 +5,7 @@
 
   const audioEl = new Audio();
   audioEl.preload = 'metadata';
-  const player = { queue: [], index: -1, shuffle: prefs.get('shuffle', '0') === '1',
+  const player = { queue: [], index: -1, failRun: 0, shuffle: prefs.get('shuffle', '0') === '1',
                    repeat: ['off', 'all', 'one'].includes(prefs.get('repeat', 'off')) ? prefs.get('repeat', 'off') : 'off',
                    history: [], played: new Set(), dragging: false };
   const listeners = [];
@@ -315,6 +315,18 @@
     else if (stage.requestFullscreen) stage.requestFullscreen().catch(() => toast('Full screen is not available here.'));
   }
 
+  // A long queue (say 5,000 songs) shows a window of rows around the current song.
+  const qView = { start: 0, size: 200 };
+
+  function queueRow(t, i) {
+    return h('div', { class: 'qrow' + (i === player.index ? ' now' : ''), 'data-i': i },
+      h('button', { class: 'qplay', type: 'button', title: `Play ${t.title}`, onclick: () => playIndex(i) },
+        h('span', { class: 'qn' }, i === player.index && !audioEl.paused ? '♪' : i + 1),
+        h('span', { class: 'qt' }, t.title),
+        h('span', { class: 'qd' }, formatTime(t.duration_ms))),
+      h('button', { class: 'qrm', type: 'button', 'aria-label': `Remove ${t.title} from the queue`, onclick: () => removeAt(i) }, icon('close')));
+  }
+
   function renderQueue() {
     const box = $('#queue-list');
     if (!box) return;
@@ -323,30 +335,56 @@
     $('#queue-total').textContent = `Total Time: ${formatTime(q.reduce((s, t) => s + (t.duration_ms || 0), 0))}`;
     $('#queue-count').textContent = q.length ? plural(q.length, 'song') : '';
     $('#queue-clear').hidden = !q.length;
+    $('#queue-save').hidden = !q.length;
     box.replaceChildren();
     if (!q.length) {
       box.append(h('p', { class: 'queue-empty' }, 'Press play on an album, or choose songs in the Songs list, and they will line up here.'));
       return;
     }
-    q.forEach((t, i) => box.append(h('div', { class: 'qrow' + (i === player.index ? ' now' : ''), 'data-i': i },
-      h('button', { class: 'qplay', type: 'button', title: `Play ${t.title}`, onclick: () => playIndex(i) },
-        h('span', { class: 'qn' }, i === player.index && !audioEl.paused ? '♪' : i + 1),
-        h('span', { class: 'qt' }, t.title),
-        h('span', { class: 'qd' }, formatTime(t.duration_ms))),
-      h('button', { class: 'qrm', type: 'button', 'aria-label': `Remove ${t.title} from the queue`, onclick: () => removeAt(i) }, icon('close')))));
+    // keep the current song inside the window
+    if (player.index >= 0 && (player.index < qView.start || player.index >= qView.start + qView.size)) {
+      qView.start = Math.max(0, player.index - 30);
+    }
+    qView.start = Math.min(qView.start, Math.max(0, q.length - 1));
+    const end = Math.min(q.length, qView.start + qView.size);
+    if (qView.start > 0) {
+      box.append(h('button', { class: 'qmore', type: 'button',
+        onclick: () => { qView.start = Math.max(0, qView.start - 200); renderQueue(); } }, `▲ ${plural(qView.start, 'earlier song')}`));
+    }
+    const frag = document.createDocumentFragment();
+    for (let i = qView.start; i < end; i++) frag.append(queueRow(q[i], i));
+    box.append(frag);
+    if (end < q.length) {
+      box.append(h('button', { class: 'qmore', type: 'button',
+        onclick: () => { qView.size += 200; renderQueue(); } }, `▼ ${plural(q.length - end, 'more song')}`));
+    }
     const now = box.querySelector('.qrow.now');
     if (now && now.scrollIntoView) now.scrollIntoView({ block: 'nearest' });
   }
 
+  // Play and pause only change the little note beside the current song.
+  function markQueue() {
+    const box = $('#queue-list');
+    if (!box) return;
+    box.querySelectorAll('.qrow').forEach((row) => {
+      const i = Number(row.dataset.i);
+      const on = i === player.index;
+      row.classList.toggle('now', on);
+      row.querySelector('.qn').textContent = on && !audioEl.paused ? '♪' : i + 1;
+    });
+  }
+
   // ---------- audio element events ----------
-  audioEl.addEventListener('play', () => { syncPlayState(); renderQueue(); });
-  audioEl.addEventListener('pause', () => { syncPlayState(); renderQueue(); });
+  audioEl.addEventListener('playing', () => { player.failRun = 0; });
+  audioEl.addEventListener('play', () => { syncPlayState(); markQueue(); });
+  audioEl.addEventListener('pause', () => { syncPlayState(); markQueue(); });
   audioEl.addEventListener('timeupdate', syncProgress);
   audioEl.addEventListener('loadedmetadata', syncProgress);
   audioEl.addEventListener('ended', () => nextTrack(false));
   audioEl.addEventListener('error', () => {
     if (!current() || !audioEl.getAttribute('src')) return;
     toast(`Can't play "${current().title}".`);
+    if (++player.failRun >= player.queue.length) { player.failRun = 0; audioEl.pause(); syncPlayState(); toast("None of these songs can be played right now."); return; }
     const i = pickNext(true);
     if (i >= 0 && i !== player.index) playIndex(i); else { audioEl.pause(); syncPlayState(); }
   });
@@ -368,6 +406,10 @@
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const typing = e.target.matches && e.target.matches('textarea, select, input:not([type=range]):not([type=checkbox]):not([type=radio])');
       if (typing) return;
+      const t = e.target;
+      if (t.closest && t.closest('dialog, [role=menu]')) return;
+      if (t.matches && t.matches('input[type=range]') && e.key.startsWith('Arrow')) return;
+      if (t.matches && t.matches('button, a, input[type=checkbox]') && e.key === ' ') return;
       const nowView = document.body.dataset.view === 'now' || document.fullscreenElement;
       if (e.key === ' ' && (e.target === document.body || nowView) && current()) { e.preventDefault(); togglePlay(); }
       else if (nowView && e.key === 'ArrowRight') { e.preventDefault(); viz.next(); }

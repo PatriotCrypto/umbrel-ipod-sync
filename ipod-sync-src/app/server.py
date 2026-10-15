@@ -5,7 +5,7 @@ import time
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 
-from . import audio, config, dupes, ipod, library, sync
+from . import audio, config, dupes, ipod, library, playlists, sync
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static")
 MAX_IDS = 20000
@@ -64,6 +64,26 @@ def create_app(start_scan=True):
     @app.errorhandler(ValueError)
     def _value_error(exc):
         return jsonify(error=str(exc)), 400
+
+    @app.errorhandler(LookupError)
+    def _missing(exc):
+        return jsonify(error=str(exc)), 404
+
+    @app.before_request
+    def _same_site_only():
+        # Changes are only accepted from this app's own pages, never from another website.
+        if request.method not in ("GET", "HEAD", "OPTIONS") \
+                and request.headers.get("Sec-Fetch-Site") == "cross-site":
+            return jsonify(error="Cross-site requests are not allowed."), 403
+
+    @app.after_request
+    def _headers(response):
+        # The page is tiny and changes with every release; lists are cached by the browser
+        # only for the moment it takes to flip between sections.
+        if request.path.startswith("/api/"):
+            response.headers.setdefault("Cache-Control", "no-store")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        return response
 
     @app.get("/")
     def index():
@@ -247,7 +267,50 @@ def create_app(start_scan=True):
 
     @app.put("/api/settings")
     def put_settings():
-        return jsonify(config.save_settings(request.get_json(silent=True) or {}))
+        before = config.music_folders()
+        settings = config.save_settings(request.get_json(silent=True) or {})
+        if config.music_folders() != before:
+            library.start_scan()
+        return jsonify(settings)
+
+    @app.get("/api/folders")
+    def folders():
+        return jsonify(library.browse_folders(request.args.get("path", "")))
+
+    # ---- playlists ----
+    @app.get("/api/playlists")
+    def playlists_list():
+        return jsonify(playlists=playlists.list_playlists())
+
+    @app.post("/api/playlists")
+    def playlists_create():
+        body = request.get_json(silent=True) or {}
+        made = playlists.create(body.get("name"), _ids(body, "track_ids", int))
+        return jsonify(made), 201
+
+    @app.get("/api/playlists/<int:pid>")
+    def playlists_get(pid):
+        return jsonify(playlists.get_playlist(pid))
+
+    @app.put("/api/playlists/<int:pid>")
+    def playlists_rename(pid):
+        body = request.get_json(silent=True) or {}
+        return jsonify(playlists.rename(pid, body.get("name")))
+
+    @app.delete("/api/playlists/<int:pid>")
+    def playlists_delete(pid):
+        playlists.delete(pid)
+        return jsonify(ok=True)
+
+    @app.post("/api/playlists/<int:pid>/tracks")
+    def playlists_add(pid):
+        body = request.get_json(silent=True) or {}
+        return jsonify(playlists.add_tracks(pid, _ids(body, "track_ids", int)))
+
+    @app.post("/api/playlists/<int:pid>/arrange")
+    def playlists_arrange(pid):
+        body = request.get_json(silent=True) or {}
+        return jsonify(playlists.arrange(pid, _ids(body, "order", int)))
 
     @app.get("/api/backups")
     def backups():
@@ -273,7 +336,7 @@ def create_app(start_scan=True):
 def main():
     from waitress import serve
     port = int(os.environ.get("PORT", "8080"))
-    serve(create_app(), host="0.0.0.0", port=port, threads=8)
+    serve(create_app(), host="0.0.0.0", port=port, threads=24)
 
 
 if __name__ == "__main__":

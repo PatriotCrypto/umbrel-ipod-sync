@@ -32,7 +32,7 @@ RUN python3 -c "import flask, mutagen, waitress" \
  && ldd "$(command -v ipod-read-sysinfo-extended)" | grep -q libusb \
  && command -v ffmpeg && command -v mount && command -v blkid
 
-ENV PORT=8080 MUSIC_DIR=/music DATA_DIR=/data IPOD_MOUNT=/ipod PYTHONUNBUFFERED=1
+ENV PORT=8080 MUSIC_DIR=/storage DATA_DIR=/data IPOD_MOUNT=/ipod PYTHONUNBUFFERED=1
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
   CMD python3 -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/api/health', timeout=3)"
