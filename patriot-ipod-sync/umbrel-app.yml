@@ -2,7 +2,7 @@ manifestVersion: 1
 id: patriot-ipod-sync
 category: media
 name: uPod
-version: "2.1.0"
+version: "2.1.1"
 tagline: Your music player, visualizer and iPod sync, all on your Umbrel
 description: >-
   uPod is a music player and nostalgic visualizer for the music on your Umbrel, with the

@@ -9,7 +9,7 @@ services:
 
   web:
     # Set this line with scripts/set-image.sh after the GitHub workflow has run.
-    image: ghcr.io/patriotcrypto/umbrel-ipod-sync:2.1.0@sha256:7e169b32cdd3e2643345255e0dbb9a8d1b27605e072e04527ff41556585bde13
+    image: ghcr.io/patriotcrypto/umbrel-ipod-sync:2.1.1@sha256:f0104ac25042c012c383c340b1f6de1c9512700fd36c044a058e9c9e58ededf9
     restart: on-failure
     init: true
 
