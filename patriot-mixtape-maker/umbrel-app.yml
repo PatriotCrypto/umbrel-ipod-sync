@@ -30,9 +30,9 @@ support: https://github.com/PatriotCrypto/mixtape-maker/issues
 port: 3917
 gallery: []
 path: ""
-defaultUsername: ""
-defaultPassword: ""
 releaseNotes: >-
   Initial release: library scan, Side A/B tape timers, tape shelf, printable J-cards and M3U export.
 submitter: PatriotCrypto
 submission: https://github.com/PatriotCrypto/mixtape-maker
+dependencies: []
+icon: https://raw.githubusercontent.com/PatriotCrypto/umbrel-ipod-sync/main/patriot-mixtape-maker/icon.svg
