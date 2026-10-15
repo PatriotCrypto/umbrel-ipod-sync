@@ -261,9 +261,16 @@ def create_app(start_scan=True):
     def sync_cancel():
         return jsonify(cancelled=sync.cancel_job())
 
+    def _with_folder_state(settings):
+        root = config.storage_root()
+        settings = dict(settings)
+        settings["missing_folders"] = [f for f in settings.get("music_folders", [])
+                                       if not os.path.isdir(os.path.join(root, f))]
+        return settings
+
     @app.get("/api/settings")
     def get_settings():
-        return jsonify(config.load_settings())
+        return jsonify(_with_folder_state(config.load_settings()))
 
     @app.put("/api/settings")
     def put_settings():
@@ -271,7 +278,7 @@ def create_app(start_scan=True):
         settings = config.save_settings(request.get_json(silent=True) or {})
         if config.music_folders() != before:
             library.start_scan()
-        return jsonify(settings)
+        return jsonify(_with_folder_state(settings))
 
     @app.get("/api/folders")
     def folders():

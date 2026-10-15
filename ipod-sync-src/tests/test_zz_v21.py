@@ -284,10 +284,23 @@ def test_unknown_cover_leaves_no_marker(client):
     assert not os.path.exists(os.path.join(library._covers_dir(), "deadbeef0000.none"))
 
 
-def test_symlink_not_indexed_or_trashed(client):
+def test_symlinked_songs_are_playable_and_never_moved_as_duplicates(client):
+    """Some Umbrels keep shortcuts to music rather than the files. A shortcut inside the
+    storage folder counts as a song; a duplicate that is one is never moved."""
     config.save_settings({"music_folders": ["V21 Music"]})
     real = _song("V21 Music", "Real", "a.mp3", "Linked Song")
     os.makedirs(os.path.join(MUSIC, "V21 Music", "Links"), exist_ok=True)
     os.symlink(real, os.path.join(MUSIC, "V21 Music", "Links", "b.mp3"))
+    os.symlink("/etc", os.path.join(MUSIC, "V21 Music", "Links", "outside"))
     _settle()
-    assert len(_ids(client, "linked+song")) == 1
+    ids = _ids(client, "linked+song")
+    assert len(ids) == 2                       # the file and the shortcut to it
+    for i in ids:
+        assert os.path.isfile(library.absolute_path(
+            library.connect().execute("SELECT relpath FROM tracks WHERE id = ?", (i,)).fetchone()[0]))
+    assert not _ids(client, "passwd")          # nothing from outside the storage folder
+    # One file under two names is not a duplicate, so neither name is ever moved.
+    assert not [g for g in dupes.find_groups() if g[0]["title"] == "Linked Song"]
+    assert dupes.trash_duplicates(ids)["moved"] == 0
+    assert os.path.isfile(real)
+    assert os.path.isfile(os.path.join(MUSIC, "V21 Music", "Links", "b.mp3"))

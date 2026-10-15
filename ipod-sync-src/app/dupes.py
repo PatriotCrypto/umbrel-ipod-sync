@@ -51,10 +51,28 @@ def find_groups():
         if not title or artist in SKIP_ARTISTS:
             continue
         buckets.setdefault((title, artist), []).append(r)
+    def _same_file(rows):
+        """Two names for one file (a shortcut, or a hard link) are one song, not duplicates."""
+        out, seen = [], set()
+        for r in rows:
+            try:
+                st = os.stat(library.absolute_path(r["relpath"]))
+                key = (st.st_dev, st.st_ino)
+            except (OSError, ValueError):
+                key = ("gone", r["relpath"])
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(r)
+        return out
+
     # Same title and artist AND about the same length: a 30 s "Intro" on one album and a 2 s
     # "Intro" on another are different songs.
     clusters = []
     for members in buckets.values():
+        if len(members) < 2:
+            continue
+        members = _same_file(members)
         if len(members) < 2:
             continue
         members = sorted(members, key=lambda r: r["duration_ms"] or 0)

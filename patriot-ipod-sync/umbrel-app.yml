@@ -41,7 +41,10 @@ port: 8741
 gallery: []
 path: ""
 releaseNotes: >-
-  New: playlists you can make in the app, a Settings option to choose which folders uPod
-  reads music from, and much faster Songs, Library and Genres pages on big collections.
-  Plus a small surprise for anyone who loves old-school music players.
+  Fixes 2.1.0 on Umbrels whose music folder is spelled differently (for example "Downloads"
+  rather than "downloads"): your library is found again without a re-scan, and playlists keep
+  their songs. Choosing folders in Settings now works on any Umbrel, says why a folder cannot
+  be used, and lets you narrow a wide library down. Playback stops after a few songs it cannot
+  play instead of racing through the queue, and two names for one file are no longer offered
+  as duplicates.
 icon: https://raw.githubusercontent.com/PatriotCrypto/umbrel-ipod-sync/main/patriot-ipod-sync/icon.svg

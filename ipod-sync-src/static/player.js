@@ -384,7 +384,7 @@
   audioEl.addEventListener('error', () => {
     if (!current() || !audioEl.getAttribute('src')) return;
     toast(`Can't play "${current().title}".`);
-    if (++player.failRun >= player.queue.length) { player.failRun = 0; audioEl.pause(); syncPlayState(); toast("None of these songs can be played right now."); return; }
+    if (++player.failRun >= Math.min(player.queue.length, 4)) { player.failRun = 0; audioEl.pause(); syncPlayState(); toast("None of these songs can be played right now."); return; }
     const i = pickNext(true);
     if (i >= 0 && i !== player.index) playIndex(i); else { audioEl.pause(); syncPlayState(); }
   });

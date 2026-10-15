@@ -48,7 +48,7 @@ def normalize_folder(rel):
     for anything that is outside it, hidden, or not a folder."""
     if not isinstance(rel, str):
         raise ValueError("folder must be text")
-    rel = rel.replace("\\", "/").strip().strip("/")
+    rel = rel.replace("\\", "/").strip("/")
     parts = [p for p in rel.split("/") if p not in ("", ".")]
     if any(p == ".." or p.startswith(".") for p in parts):
         raise ValueError("that folder is not allowed")
@@ -62,6 +62,78 @@ def normalize_folder(rel):
     return rel
 
 
+def real_case(rel):
+    """`rel` with each part spelled the way it is on disk ('downloads' -> 'Downloads'), so a
+    folder saved or defaulted in the wrong capitals is still found. Unchanged if not found."""
+    if not isinstance(rel, str) or not rel:
+        return rel
+    cur, out = storage_root(), []
+    for part in [p for p in rel.replace("\\", "/").split("/") if p]:
+        if os.path.isdir(os.path.join(cur, part)):
+            name = part
+        else:
+            try:
+                names = [n for n in os.listdir(cur) if n.lower() == part.lower()
+                         and os.path.isdir(os.path.join(cur, n))]
+            except OSError:
+                return rel
+            if not names:
+                return rel
+            name = sorted(names)[0]
+        out.append(name)
+        cur = os.path.join(cur, name)
+    return "/".join(out)
+
+
+# Looked for, in order, when the folder named by DEFAULT_MUSIC_FOLDERS is not on this Umbrel.
+FALLBACK_NAMES = ("downloads", "music", "media")
+
+
+def _has_music(folder, budget=4000):
+    """True if there is a song somewhere in `folder`. Gives up after `budget` entries so a
+    huge folder of something else can't hold up the first start."""
+    from . import audio
+    if not os.path.isdir(folder):
+        return False
+    stack, seen = [folder], set()
+    while stack and budget > 0:
+        try:
+            entries = list(os.scandir(stack.pop()))
+        except OSError:
+            continue
+        for e in entries:
+            budget -= 1
+            if budget <= 0 or e.name.startswith("."):
+                break
+            try:
+                if e.is_dir():
+                    real = os.path.realpath(e.path)
+                    if real not in seen:
+                        seen.add(real)
+                        stack.append(e.path)
+                elif os.path.splitext(e.name)[1].lower() in audio.AUDIO_EXTENSIONS:
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def usable_defaults():
+    """The default folders, spelled as they are on disk. If none of them is there -- another
+    Umbrel keeps its music somewhere else entirely -- use the whole storage folder, which is
+    right on every layout."""
+    root = storage_root()
+    out = [real_case(f) for f in DEFAULT_FOLDERS]
+    if any(f == "" or os.path.isdir(os.path.join(root, f)) for f in out):
+        return out
+    for name in FALLBACK_NAMES:
+        real = real_case(name)
+        if _has_music(os.path.join(root, real)):
+            return [real]
+    # Nothing recognisable: the whole storage folder, which is right on any layout.
+    return [""]
+
+
 def _tidy_folders(folders):
     """Drop repeats and folders that sit inside another chosen folder."""
     out = []
@@ -73,12 +145,12 @@ def _tidy_folders(folders):
 
 def music_folders():
     folders = load_settings()["music_folders"]
-    return _tidy_folders([f for f in folders if isinstance(f, str)]) or list(DEFAULT_FOLDERS)
+    return _tidy_folders([f for f in folders if isinstance(f, str)]) or usable_defaults()
 
 
 def load_settings():
     settings = dict(DEFAULT_SETTINGS)
-    settings["music_folders"] = list(DEFAULT_FOLDERS)
+    settings["music_folders"] = usable_defaults()
     try:
         with open(_settings_path(), "r", encoding="utf-8") as fh:
             stored = json.load(fh)
@@ -87,7 +159,11 @@ def load_settings():
                 settings[key] = stored[key]
         if isinstance(settings["music_folders"], list):
             settings["music_folders"] = [f for f in settings["music_folders"] if isinstance(f, str)] \
-                or list(DEFAULT_FOLDERS)
+                or usable_defaults()
+    except (OSError, ValueError):
+        pass
+    try:
+        settings["music_folders"] = [real_case(f) for f in settings["music_folders"]]
     except (OSError, ValueError):
         pass
     return settings
@@ -106,7 +182,16 @@ def save_settings(updates):
             folders = updates["music_folders"]
             if not isinstance(folders, list) or not folders:
                 raise ValueError("choose at least one music folder")
-            settings["music_folders"] = _tidy_folders([normalize_folder(f) for f in folders])
+            # A folder that is already in the list stays even when it can't be found right now
+            # (an unplugged drive); only newly added folders must exist.
+            have = set(settings["music_folders"])
+            keep = []
+            for f in folders:
+                if isinstance(f, str) and f.strip().strip("/") in have:
+                    keep.append(f.strip().strip("/"))
+                else:
+                    keep.append(normalize_folder(f))
+            settings["music_folders"] = _tidy_folders(keep)
         for key in ("convert_lossless", "artwork", "hfs_force_rw"):
             if key in updates:
                 settings[key] = bool(updates[key])

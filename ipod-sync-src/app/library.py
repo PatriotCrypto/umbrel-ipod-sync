@@ -64,7 +64,7 @@ ALBUM_KEY_RE = re.compile(r"^[0-9a-f]{12}$")
 COVER_NAMES = ("cover", "folder", "front", "album", "albumart")
 COVER_EXTS = (".jpg", ".jpeg", ".png")
 
-_scan_lock = threading.Lock()
+_start_lock = threading.Lock()
 _rescan = threading.Event()
 scan_state = {"running": False, "scanned": 0, "total": 0, "added": 0, "removed": 0,
               "finished": None, "error": None, "missing_folders": []}
@@ -165,9 +165,14 @@ def _ensure_schema(conn):
         # An index made before uPod could browse the whole storage folder holds paths relative
         # to the Downloads folder: put the folder name back in front of them.
         if count and config.LEGACY_PREFIX:
-            conn.execute("UPDATE tracks SET relpath = ? || '/' || relpath", (config.LEGACY_PREFIX,))
-        _set_meta(conn, "layout", LAYOUT)
-        _set_meta(conn, "derived", "")
+            prefix = config.real_case(config.LEGACY_PREFIX)
+            for table in ("tracks", "playlist_items"):
+                conn.execute(f"UPDATE {table} SET relpath = ? || '/' || relpath", (prefix,))
+        if not count or config.LEGACY_PREFIX:
+            _set_meta(conn, "layout", LAYOUT)
+            _set_meta(conn, "derived", "")
+        # Otherwise leave the marker alone: an old index with no folder name to put back is
+        # better migrated on a later start than quietly treated as up to date.
     version = f"{DERIVED_VERSION}:{genres.RULES_VERSION}"
     if _meta(conn, "derived") != version:
         _rederive_all(conn)
@@ -225,37 +230,104 @@ def refresh_derived(conn):
 
 # ---------- scanning ----------
 
+def _inside(root, path):
+    return path == root or path.startswith(root + os.sep)
+
+
 def _walk_audio(root):
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+    storage = config.storage_root()
+    seen = {os.path.realpath(root)}
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+        keep = []
+        for name in sorted(dirnames):
+            if name.startswith("."):
+                continue
+            real = os.path.realpath(os.path.join(dirpath, name))
+            # A shortcut to somewhere outside the storage folder cannot be read from in here,
+            # and one that points back at a folder already walked would list it twice.
+            if not _inside(storage, real) or real in seen:
+                continue
+            seen.add(real)
+            keep.append(name)
+        dirnames[:] = keep
         for name in sorted(filenames):
             if name.startswith("."):
                 continue
+            if os.path.splitext(name)[1].lower() not in audio.AUDIO_EXTENSIONS:
+                continue
             full = os.path.join(dirpath, name)
-            if os.path.splitext(name)[1].lower() in audio.AUDIO_EXTENSIONS and not os.path.islink(full):
-                yield full
+            if os.path.islink(full):
+                real = os.path.realpath(full)
+                if not _inside(storage, real) or not os.path.isfile(real):
+                    continue
+            yield full
 
 
 def scan():
-    """Index new and changed files in the chosen music folders and forget files that are gone.
-    A chosen folder that can't be found right now (a drive that is unplugged) is left alone."""
-    if not _scan_lock.acquire(blocking=False):
+    """Index the chosen music folders now. Returns False if a scan is already under way."""
+    if not _claim_scan():
         return False
+    return _scan_loop()
+
+
+def _claim_scan():
+    """Mark a scan as under way, so the app says "scanning" the moment it is asked to scan
+    rather than a moment later when the thread gets going."""
+    with _start_lock:
+        if scan_state["running"]:
+            return False
+        scan_state.update(running=True, scanned=0, total=0, added=0, removed=0,
+                          finished=None, error=None, missing_folders=[])
+        return True
+
+
+def _scan_loop():
     try:
         while True:
             _rescan.clear()
             _scan_once()
-            if not _rescan.is_set():     # settings changed meanwhile: go around again
-                break
+            # The folders were changed while this scan was reading the old ones: go again.
+            if not _rescan.is_set():
+                return True
     finally:
         scan_state["running"] = False
-        _scan_lock.release()
-    return True
+
+
+def fix_folder_case(conn):
+    """Repair paths whose top folder is spelled differently on disk ('downloads/...' when the
+    folder is really 'Downloads'): follow the folder instead of forgetting every song in it.
+    Playlist entries follow too, so playlists survive."""
+    root = config.storage_root()
+    try:
+        on_disk = {}
+        for name in os.listdir(root):
+            if os.path.isdir(os.path.join(root, name)):
+                on_disk.setdefault(name.lower(), name)
+    except OSError:
+        return
+    tops = set()
+    for table in ("tracks", "playlist_items"):
+        tops |= {r[0] for r in conn.execute(
+            f"SELECT DISTINCT substr(relpath, 1, instr(relpath, '/') - 1) FROM {table} "
+            f"WHERE instr(relpath, '/') > 0")}
+    changed = False
+    for top in tops:
+        real = on_disk.get(top.lower()) if top else None
+        if not real or real == top:
+            continue
+        for table in ("tracks", "playlist_items"):
+            conn.execute(
+                f"UPDATE OR IGNORE {table} SET relpath = ? || substr(relpath, ?) "
+                f"WHERE substr(relpath, 1, ?) = ?",
+                (real, len(top) + 1, len(top) + 1, top + "/"))
+        changed = True
+    if changed:
+        conn.commit()
 
 
 def _scan_once():
     try:
-        scan_state.update(running=True, scanned=0, total=0, added=0, removed=0,
+        scan_state.update(scanned=0, total=0, added=0, removed=0,
                           finished=None, error=None, missing_folders=[])
         storage = config.storage_root()
         if not os.path.isdir(storage):
@@ -273,6 +345,7 @@ def _scan_once():
             raise OSError("None of your music folders can be found: " + ", ".join(missing))
         conn = connect()
         try:
+            fix_folder_case(conn)
             known = {r["relpath"]: (r["mtime"], r["size"])
                      for r in conn.execute("SELECT relpath, mtime, size FROM tracks")}
             scan_state["total"] = len(files)
@@ -353,9 +426,9 @@ def _scan_once():
 
 def start_scan():
     _rescan.set()
-    if scan_state["running"]:
-        return False
-    threading.Thread(target=scan, name="library-scan", daemon=True).start()
+    if not _claim_scan():
+        return False      # the scan already running will go round again for the new folders
+    threading.Thread(target=_scan_loop, name="library-scan", daemon=True).start()
     return True
 
 
@@ -369,7 +442,9 @@ def summary():
         albums = conn.execute("SELECT COUNT(*) FROM albums").fetchone()[0]
         return {"tracks": row["tracks"], "albums": albums, "bytes": row["bytes"],
                 "scan": dict(scan_state), "generation": _generation,
-                "music_dir_exists": os.path.isdir(config.MUSIC_DIR)}
+                "music_dir_exists": any(
+                    os.path.isdir(os.path.join(config.storage_root(), f))
+                    for f in config.music_folders())}
     finally:
         conn.close()
 
