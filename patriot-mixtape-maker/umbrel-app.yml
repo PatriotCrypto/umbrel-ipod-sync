@@ -1,0 +1,38 @@
+manifestVersion: 1
+id: patriot-mixtape-maker
+category: media
+name: Mixtape Maker
+version: "0.1.0"
+tagline: Make cassette mixtapes with real side limits and printable J-cards
+description: >-
+  Mixtape Maker brings the 90s mixtape ritual to your Umbrel.
+
+
+  Pick songs from your own music folder and fit them onto Side A and Side B of a 30, 45, 60 or 90 minute tape. A live
+  tape counter shows how much room is left, so you have to make hard choices, just like the old days.
+
+
+  Give each tape a title, a to/from line and a note, choose a label style (classic red, studio green, chrome blue or plain white), and print a
+  J-card insert to cut out and fold. Every tape you make is kept on a shelf so you can reopen, edit or print it later.
+
+
+  Export any tape as an M3U playlist (Side A then Side B) to copy to an iPod, a phone, or sync with iPod Sync.
+
+
+  Your music stays on your Umbrel. Nothing leaves your network.
+
+
+  Music is read from the Umbrel Downloads folder in read-only mode.
+developer: PatriotCrypto
+website: https://github.com/PatriotCrypto/mixtape-maker
+repo: https://github.com/PatriotCrypto/mixtape-maker
+support: https://github.com/PatriotCrypto/mixtape-maker/issues
+port: 3917
+gallery: []
+path: ""
+defaultUsername: ""
+defaultPassword: ""
+releaseNotes: >-
+  Initial release: library scan, Side A/B tape timers, tape shelf, printable J-cards and M3U export.
+submitter: PatriotCrypto
+submission: https://github.com/PatriotCrypto/mixtape-maker

@@ -1,0 +1,20 @@
+version: "3.7"
+
+services:
+  app_proxy:
+    environment:
+      APP_HOST: patriot-mixtape-maker_web_1
+      APP_PORT: 3000
+
+  web:
+    image: ghcr.io/patriotcrypto/mixtape-maker:0.1.0@sha256:0592ca17ec0866f2e5011f8b767123dc59db5ea16f010f2b90757d3270523854
+    user: "1000:1000"
+    restart: on-failure
+    stop_grace_period: 1m
+    environment:
+      PORT: "3000"
+      MUSIC_DIR: /music
+      DATA_DIR: /data
+    volumes:
+      - ${UMBREL_ROOT}/data/storage/downloads:/music:ro
+      - ${APP_DATA_DIR}/data:/data
