@@ -412,6 +412,8 @@
       sub.textContent = `${plural(st.device.tracks, 'song')} on the iPod · ${lib ? `${plural(lib.albums, 'album')}, ${plural(lib.tracks, 'song')}` : '…'} in your library`;
     } else if (st.state === 'needs_mount') {
       main.textContent = 'iPod found'; sub.textContent = state.mountError ? 'Could not open it' : 'Opening it…';
+    } else if (st.state === 'ejected') {
+      main.textContent = 'Safe to unplug'; sub.textContent = 'The iPod has been ejected';
     } else if (st.state === 'error') {
       main.textContent = 'iPod problem'; sub.textContent = 'See the panel on the right';
     } else if (st.state === 'disconnected') {
@@ -890,6 +892,13 @@
             h('button', { class: 'btn', type: 'button', onclick: () => { state.mountError = ''; mountIpod(); } }, 'Try again'))]
         : [h('p', { class: 'waiting' }, 'Opening it…')];
       pod.append(...podShell('iPod found', '', ...body));
+      return;
+    }
+    if (st.state === 'ejected') {
+      pod.append(...podShell('Safe to unplug', '',
+        h('p', { class: 'waiting' }, 'The iPod has been ejected. Unplug it whenever you like.'),
+        h('div', { class: 'plan-buttons', style: 'margin-top:0.8rem' },
+          h('button', { class: 'btn', type: 'button', onclick: mountIpod }, 'Open it again'))));
       return;
     }
     if (st.state === 'error') {

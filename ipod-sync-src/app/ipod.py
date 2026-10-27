@@ -8,7 +8,7 @@ import stat
 import subprocess
 import threading
 
-from . import config, library
+from . import config, hashinfo, library
 
 APPLE_VENDOR = "05ac"
 NANO_5G_ID = 27  # ITDB_IPOD_GENERATION_NANO_5 in libgpod
@@ -18,6 +18,7 @@ DATA_FS_TYPES = ("vfat", "hfsplus", "hfs")
 
 _lock = threading.RLock()
 _tracks_cache = {"tracks": None}
+_ejected = set()   # (bus, device) of iPods the user ejected and has not unplugged yet
 
 
 class IpodError(Exception):
@@ -197,6 +198,7 @@ def mount_ipod(settings=None):
         usb = find_usb_ipods()
         if not usb:
             raise IpodError("No iPod is connected to the Umbrel.")
+        _ejected.clear()
         disk = disk_for_usb(usb[0]["sysdir"])
         if not disk:
             raise IpodError("The iPod is connected but its storage is not showing up. "
@@ -219,6 +221,10 @@ def mount_ipod(settings=None):
             subprocess.run(["umount", config.IPOD_MOUNT], capture_output=True)
             raise IpodError("This does not look like an iPod: there is no iPod_Control folder.")
         _read_sysinfo_extended(usb[0])
+        try:
+            hashinfo.ensure(config.IPOD_MOUNT)
+        except Exception:   # never let this stop the iPod from opening
+            pass
         _tracks_cache["tracks"] = None
 
 
@@ -246,6 +252,8 @@ def unmount_ipod():
         if result.returncode != 0:
             raise IpodError("The iPod is still in use. Wait for the current sync to finish, "
                             "then try again.")
+        # Remember it, or the page would open the iPod again a moment later.
+        _ejected.update((u["bus"], u["device"]) for u in find_usb_ipods())
         _tracks_cache["tracks"] = None
 
 
@@ -343,8 +351,12 @@ def status():
     """Everything the UI needs to draw the iPod panel."""
     usb = [] if config.FAKE_MOUNT else find_usb_ipods()
     if not config.FAKE_MOUNT and not usb and not mount_info():
+        _ejected.clear()
         return {"state": "disconnected"}
     if not is_mounted():
+        _ejected.intersection_update((u["bus"], u["device"]) for u in usb)   # unplugged: forget
+        if usb and all((u["bus"], u["device"]) in _ejected for u in usb):
+            return {"state": "ejected", "usb": {"product": usb[0]["product"]}}
         return {"state": "needs_mount", "usb": {"product": usb[0]["product"]}}
     mount = mount_info()
     options = mount[2] if mount else []

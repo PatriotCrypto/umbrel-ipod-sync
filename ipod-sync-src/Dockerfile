@@ -16,7 +16,7 @@ FROM debian:bookworm-slim
 # package on bookworm.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      python3 python3-flask python3-mutagen python3-waitress \
+      python3 python3-flask python3-mutagen python3-waitress python3-cryptography \
       ffmpeg libgpod4 libgpod-common mount util-linux \
  && rm -rf /var/lib/apt/lists/*
 
@@ -26,7 +26,7 @@ COPY app /srv/app
 COPY static /srv/static
 
 # Fail the build early if anything the app depends on is missing.
-RUN python3 -c "import flask, mutagen, waitress" \
+RUN python3 -c "import flask, mutagen, waitress, cryptography" \
  && ipodsync 2>&1 | grep -q usage \
  && command -v ipod-read-sysinfo-extended \
  && ldd "$(command -v ipod-read-sysinfo-extended)" | grep -q libusb \

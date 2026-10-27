@@ -245,18 +245,32 @@
     </form>
   </dialog>
 
-  <dialog id="liner" aria-labelledby="liner-title">
-    <div class="liner">
-      <div class="liner-disc" aria-hidden="true"></div>
-      <p class="liner-kicker">Hidden track · 12 of 12</p>
-      <h2 id="liner-title">Liner Notes</h2>
-      <p class="liner-lead">Made with love by a fellow millennial.</p>
-      <p>Remember when music was something you <em>had</em>? A burned CD with the track list in Sharpie. A Discman that skipped if you breathed on it. Sitting through dial-up for one song that turned out to be a stranger’s voice saying “gotcha.” A mixtape that ate a whole Saturday and meant everything. And that deal for twelve CDs for a penny, as long as you didn’t read the fine print.</p>
+  <div id="rip-pop" class="rip-pop" role="alertdialog" aria-labelledby="rip-pop-text" hidden>
+    <div class="rip-bubble">
+      <p id="rip-pop-text">It looks like you’re trying to listen to music you actually <strong>own</strong>. Want a hand with that?</p>
+      <div class="rip-btns">
+        <button class="btn primary" type="button" data-act="more">Tell me more</button>
+        <button class="btn" type="button" data-act="no">Not now</button>
+      </div>
+    </div>
+    <div class="rip-slot"></div>
+  </div>
+
+  <dialog id="rip-note" aria-labelledby="rip-title">
+    <div class="rip-note">
+      <div class="rip-head">
+        <div>
+          <h2 id="rip-title">Hi. I’m Rip.</h2>
+          <p class="rip-lead">Made with love by a fellow millennial.</p>
+        </div>
+        <div class="rip-slot" title="Go on, poke me"></div>
+      </div>
+      <p>Remember when music was something you <em>had</em>? A burned CD with the track list in Sharpie. A Discman that skipped if you breathed on it. Sitting through dial-up for one song that turned out to be a stranger’s voice saying “gotcha.” A mixtape that ate a whole Saturday and meant everything. And twelve CDs for a penny, as long as you didn’t read the fine print.</p>
       <p>Then came the algorithms. The apps. The subscriptions. Now nearly everything is rented, nothing is really yours, and the shuffle knows you better than you’d like.</p>
-      <p>uPod can’t give those days back. Nobody can. But it’s a step in the right direction: your music, on your own hardware, in your own house. No ads, no monthly fee, nobody deciding what you hear next. Plug in an old iPod and let it sing again.</p>
-      <p class="liner-tag">Simple music. Music you own.</p>
-      <p class="liner-ps">P.S. The white earbuds are optional.</p>
-      <button id="liner-close" class="btn primary" type="button">Back to the music</button>
+      <p>uPod can’t give those days back. Nobody can. But it’s a step in the right direction: your music, on your own hardware, in your own house. No ads, no monthly fee, nobody deciding what you hear next.</p>
+      <p class="rip-tag">Simple music. Music you own.</p>
+      <p class="rip-ps">P.S. Please don’t leave me on the dashboard in July.</p>
+      <button id="rip-close" class="btn primary" type="button">Back to the music</button>
     </div>
   </dialog>
 
@@ -268,6 +282,7 @@
   <script src="/static/views.js"></script>
   <script src="/static/folders.js"></script>
   <script src="/static/playlists.js"></script>
+  <script src="/static/rip.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

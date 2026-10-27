@@ -51,34 +51,6 @@
 
   window.IP.nav = { go, current: () => currentNav };
 
-  // A hidden track: click the orb seven times (or enter the old cheat code) for the liner notes.
-  function setupEasterEgg() {
-    const dlg = $('#liner');
-    const open = () => {
-      if (dlg.open) return;
-      dlg.showModal();
-    };
-    let clicks = 0, timer = null;
-    $('#orb').addEventListener('click', () => {
-      clicks += 1;
-      clearTimeout(timer);
-      timer = setTimeout(() => { clicks = 0; }, 2500);
-      const orb = $('#orb');
-      orb.classList.remove('nudge'); void orb.getBoundingClientRect(); if (clicks > 2) orb.classList.add('nudge');
-      if (clicks >= 7) { clicks = 0; open(); }
-    });
-    const code = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a'];
-    let at = 0;
-    document.addEventListener('keydown', (e) => {
-      if (e.target.matches && e.target.matches('input, textarea, select')) { at = 0; return; }
-      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-      at = key === code[at] ? at + 1 : (key === code[0] ? 1 : 0);
-      if (at === code.length) { at = 0; open(); }
-    });
-    $('#liner-close').addEventListener('click', () => dlg.close());
-    dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
-  }
-
   function init() {
     buildSkinList();
     setSkin(prefs.get('skin', 'aqua'));
@@ -89,7 +61,7 @@
     window.IP.views.init();
     window.IP.folders.init();
     window.IP.playlists.init();
-    setupEasterEgg();
+    window.IP.rip.init();
     const saved = prefs.get('nav', 'now');
     go(['now', 'library', 'songs', 'playlists', 'genres', 'ipod', 'dupes'].includes(saved) ? saved : 'now');
     // Picking something to play from the iPod shows the visualizer, like a media player would.
