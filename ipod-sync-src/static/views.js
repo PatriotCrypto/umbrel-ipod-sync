@@ -53,6 +53,20 @@
     } catch (err) { toast(err.message); }
   }
 
+  // Every song the list shows (respecting search and genre) goes in the iPod basket.
+  async function addAllSongs() {
+    try {
+      const ids = [];
+      for (let offset = 0; offset < 100000; offset += 5000) {
+        const data = await api(`/api/library/tracks?${songsParams({ limit: 5000, offset })}`);
+        data.tracks.forEach((t) => ids.push(t.id));
+        if (ids.length >= data.total || !data.tracks.length) break;
+      }
+      if (!ids.length) { toast('No songs to add.'); return; }
+      window.IP.lib.selectTracks(ids);
+    } catch (err) { toast(err.message); }
+  }
+
   function songRow(t) {
     return h('div', { class: 'songrow' + (P.isCurrent('library', t.id) ? ' now' : ''), role: 'row', 'data-id': t.id },
       h('button', { class: 'rowplay', type: 'button', 'data-act': 'play', title: `Play ${t.title}`, 'aria-label': `Play ${t.title}` }, icon('play')),
@@ -321,6 +335,7 @@
     $('#songs-sort').addEventListener('change', (e) => { songs.sort = e.target.value; prefs.set('songSort', songs.sort); loadSongs(true); });
     $('#songs-play').addEventListener('click', () => playSongs(undefined, false));
     $('#songs-shuffle').addEventListener('click', () => playSongs(undefined, true));
+    $('#songs-add').addEventListener('click', addAllSongs);
     P.onChange(() => { if (document.body.dataset.view === 'songs') markNow(); });
     window.IP.scroller().addEventListener('scroll', () => {
       if (document.body.dataset.view !== 'songs' || songs.loading || songs.items.length >= songs.total) return;

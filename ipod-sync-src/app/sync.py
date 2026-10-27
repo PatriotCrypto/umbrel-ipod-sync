@@ -78,6 +78,36 @@ def build_plan(album_ids, track_ids, remove_ids, settings=None):
     }
 
 
+def fit_selection(album_ids, track_ids, settings=None):
+    """Trim a selection so it fits in the iPod's free space: albums first, in the order given,
+    then single songs. An album that does not fit is skipped and later, smaller ones may still
+    go in. Things already on the iPod take no room, so they stay."""
+    settings = settings or config.load_settings()
+    free = 0
+    try:
+        free = shutil.disk_usage(ipod.mount_path()).free
+    except OSError:
+        pass
+    room = max(0, free - config.FREE_SPACE_RESERVE)
+    used = 0
+    kept_albums, kept_tracks, dropped = [], [], 0
+    for album_id in album_ids or []:
+        add = build_plan([album_id], [], [], settings)["bytes"]["add"]
+        if used + add <= room:
+            used += add
+            kept_albums.append(album_id)
+        else:
+            dropped += 1
+    for track_id in track_ids or []:
+        add = build_plan([], [track_id], [], settings)["bytes"]["add"]
+        if used + add <= room:
+            used += add
+            kept_tracks.append(track_id)
+        else:
+            dropped += 1
+    return {"albums": kept_albums, "tracks": kept_tracks, "dropped": dropped, "bytes": used}
+
+
 # ---------- backups ----------
 
 def _dir_size(path):

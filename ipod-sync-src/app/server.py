@@ -245,6 +245,11 @@ def create_app(start_scan=True):
         plan["add"] = plan["add"][:5]  # the UI only needs counts and a sample
         return jsonify(plan)
 
+    @app.post("/api/sync/fit")
+    def sync_fit():
+        body = request.get_json(silent=True) or {}
+        return jsonify(sync.fit_selection(_ids(body, "albums", str), _ids(body, "tracks", int)))
+
     @app.post("/api/sync/start")
     def sync_start():
         body = request.get_json(silent=True) or {}

@@ -152,6 +152,17 @@
     }, 350);
   }
 
+  // Too much selected for the iPod: keep what fits, in the order it was chosen.
+  async function keepWhatFits() {
+    try {
+      const fit = await api('/api/sync/fit', { method: 'POST', body: { albums: [...state.selAlbums], tracks: [...state.selTracks] } });
+      state.selAlbums = new Set(fit.albums);
+      state.selTracks = new Set(fit.tracks);
+      toast(fit.dropped ? `Kept what fits and left out ${plural(fit.dropped, 'item')}.` : 'Everything fits.');
+    } catch (err) { toast(err.message); }
+    schedulePlan(); renderList(); renderSheet();
+  }
+
   async function startSync() {
     const plan = state.plan;
     if (plan && plan.counts.remove) {
@@ -453,7 +464,7 @@
     document.body.dataset.tile = state.tile;
 
     const btn = $('#btn-select-all');
-    btn.textContent = selectionCount() ? 'Clear selection' : (library ? 'Select all' : 'Select all to remove');
+    btn.textContent = selectionCount() ? 'Clear selection' : (library ? 'Select all albums' : 'Select all to remove');
     btn.disabled = !hasDevice || !ipodState().can_sync;
 
     const nav = $('#letters');
@@ -859,9 +870,11 @@
       h('p', {}, bits.length ? bits.join(', ') + '.' : 'Nothing new to copy.'),
       !plan.fits ? h('div', { class: 'notice error' }, h('strong', {}, 'Not enough space'),
         `This needs ${formatBytes(plan.bytes.net)} but only ${formatBytes(plan.bytes.free)} is free. ` +
-        'Choose fewer songs or remove some from the iPod.') : null,
+        'Keep what fits will trim the selection to the space left, or remove some songs from the iPod.') : null,
       h('div', { class: 'plan-buttons', style: !plan.fits ? 'margin-top:0.7rem' : '' },
-        h('button', { class: 'btn primary', type: 'button', disabled: !canSync, onclick: startSync }, label), clear));
+        plan.fits ? h('button', { class: 'btn primary', type: 'button', disabled: !canSync, onclick: startSync }, label)
+          : h('button', { class: 'btn primary', type: 'button', onclick: keepWhatFits }, 'Keep what fits'),
+        clear));
   }
 
   function podShell(title, subtitle, ...body) {
